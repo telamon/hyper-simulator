@@ -199,6 +199,7 @@ class HyperSim {
   }
 
   async setup (scenario) {
+    await this.teardown()
     try {
       const stat = statSync(this.poolPath)
       if (!stat.isDirectory()) throw new Error(`Path already exists and is not a directory: ${this.poolPath}`)
@@ -249,8 +250,12 @@ class HyperSim {
         this._swarm.tick(deltaTime) // if is hyperswarmSim
         timeLastRun = time
       }
-      rimraf(this.poolPath, done)
-    })
+      done()
+    }).then(() => this.teardown())
+  }
+
+  teardown () {
+    return defer(done => rimraf(this.poolPath, done))
   }
 }
 module.exports = HyperSim

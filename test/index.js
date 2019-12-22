@@ -5,7 +5,44 @@ const HyperSim = require('..')
 let redKey = null
 let blueKey = null
 
-test('Basic hypercore simulation', t => {
+test('simulated sockets', async t => {
+  try {
+    const sim = new HyperSim()
+    await sim.setup([
+      {
+        name: 'seed',
+        count: 1,
+        initFn ({ swarm, signal, name }, end) {
+          let pending = 1
+          swarm.join('topic', ({ stream, initiating, leave }) => {
+            stream.once('data', chunk => {
+              t.equal(chunk.toString(), 'hey seed', 'Leech msg received')
+              stream.write('Yo leech!')
+              if (!--pending) end()
+            })
+          })
+        }
+      },
+      {
+        name: 'leech',
+        count: 1,
+        initFn ({ swarm, signal, name }, end) {
+          swarm.join('topic', ({ stream, initiating, leave }) => {
+            stream.once('data', chunk => {
+              t.equal(chunk.toString(), 'Yo leech!', 'Seed msg received')
+              end()
+            })
+            stream.write('hey seed')
+          })
+        }
+      }
+    ])
+
+    await sim.run()
+    t.end()
+  } catch (err) { t.error(err) }
+})
+test.skip('Basic hypercore simulation', t => {
   try {
     const simulation = new HyperSim()
     simulation
@@ -18,7 +55,6 @@ test('Basic hypercore simulation', t => {
       .then(t.end)
       .catch(t.end)
   } catch (e) {
-    console.error('Simulation failed', e)
     t.end(e)
   }
 })
@@ -33,11 +69,12 @@ function SimulatedPeer ({ storage, swarm, signal, id, name }, end) {
 
   function setupSwarm () {
     const leave = swarm.join(Buffer.from('mTopic'), ({ stream, initiating, leave }) => {
-      stream.pipe(feed.replicate(initiating)).pipe(stream)
+      const protoStream = feed.replicate(initiating)
+      stream.pipe(protoStream).pipe(stream)
       stream.once('finish', validateEnd)
     })
 
-    feed.on('append', seq => {
+    feed.on('download', seq => {
       signal('block', { seq: feed.length })
       if (feed.length >= 2) {
         leave()
