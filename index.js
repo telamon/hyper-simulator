@@ -30,13 +30,14 @@ class BufferedThrottleStream {
     this.budgetTx = 0
 
     this.a = new Duplex({
-      write: (data, cb) => this.__write(true, data, cb)
+      write: (data, cb) => this.__write(true, data, cb),
+      predestroy: () => this.b.destroy()
+
     })
     this.b = new Duplex({
-      write: (data, cb) => this.__write(false, data, cb)
+      write: (data, cb) => this.__write(false, data, cb),
+      predestroy: () => this.a.destroy()
     })
-    this.a.on('close', () => { debugger })
-    this.b.on('close', () => { debugger })
     this.bufferA = new FIFO()
     this.bufferB = new FIFO()
     // Monkey patch peek method.
@@ -139,10 +140,6 @@ class HyperswarmSim {
 
     src.handler({ stream: stream.a, initiating: true, leave: () => this.leave(topic, src) })
     dst.handler({ stream: stream.b, initiating: false, leave: () => this.leave(topic, dst) })
-  }
-
-  get connectivity () {
-
   }
 
   tick (deltaTime) {

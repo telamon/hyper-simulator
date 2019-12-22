@@ -4,10 +4,11 @@ const HyperSim = require('..')
 
 let redKey = null
 let blueKey = null
-
+function noop () {}
 test('simulated sockets', async t => {
+  t.plan(4)
   try {
-    const sim = new HyperSim()
+    const sim = new HyperSim({ logger: noop })
     await sim.setup([
       {
         name: 'seed',
@@ -15,10 +16,13 @@ test('simulated sockets', async t => {
         initFn ({ swarm, signal, name }, end) {
           let pending = 1
           swarm.join('topic', ({ stream, initiating, leave }) => {
+            stream.once('close', () => {
+              if (!--pending) t.notOk(end(), 'Seed stream closed')
+            })
             stream.once('data', chunk => {
               t.equal(chunk.toString(), 'hey seed', 'Leech msg received')
               stream.write('Yo leech!')
-              if (!--pending) end()
+              stream.end()
             })
           })
         }
@@ -30,7 +34,10 @@ test('simulated sockets', async t => {
           swarm.join('topic', ({ stream, initiating, leave }) => {
             stream.once('data', chunk => {
               t.equal(chunk.toString(), 'Yo leech!', 'Seed msg received')
-              end()
+              stream.destroy()
+            })
+            stream.once('close', () => {
+              t.notOk(end(), 'Leech stream closed')
             })
             stream.write('hey seed')
           })
