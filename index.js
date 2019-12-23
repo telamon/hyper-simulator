@@ -17,17 +17,71 @@ function peekPatch () {
   return this.tail.buffer[this.tail.btm]
 }
 
+class SimulatedPeer {
+  constructor (id, signal, handlers = {}, opts = {}) {
+    this.id = id
+    this.name = opts.name
+    this.linkRate = opts.linkRate || 102400
+    this.latency = opts.latency || 100
+    this.maxConnections = opts.maxConnections || 5
+    this.sockets = []
+    this.lastTick = 0
+    this.age = 0
+    this.finished = false
+    this._signal = (ev, payload) => signal('peer', ev, {
+      id,
+      name: this.name,
+      ...payload
+    })
+    this._signal('init', {})
+  }
+
+  connect (peer) {
+    if (this.isPoolFull || peer.isPoolFull) return false
+    const socket = new BufferedThrottleStream()
+    this._accept(socket)
+    peer._accept(socket)
+    peer.handlers.onconnect(socket, true)
+    peer.handlers.onconnect(socket.b, false)
+    return socket
+  }
+
+  tick (iteration, delta) {
+    this.age++
+    this.lastTick = iteration
+  }
+
+  get isPoolFull () {
+    return !(this.socket.length < this.maxConnections)
+  }
+
+  _end () {
+    this.finished = true
+    this._signal('end')
+  }
+
+  _accept (socket) {
+    if (this.isPoolFull) return false
+
+    socket.once('close', () => {
+      this.sockets.splice(this.sockets.indexOf(socket), 1)
+    })
+    this.sockets.push(socket)
+    return true
+  }
+}
+
 class BufferedThrottleStream extends Duplex {
   /**
    * @param linkRate {Number} - max allowed bytes per second (default: 1Mbit)
    * @param latency {Number} - Link latency in ms
    */
-  constructor (linkRate = 102400, latency = 100) {
+  constructor (latency = 100) {
     super({
       write: (data, cb) => this.__write(true, data, cb),
       predestroy: () => { nextTick(() => this.b.destroyed || this.b.destroy()) }
     })
-    this.maxRate = linkRate
+    this.lastTick = 0
     this.latency = latency
     this.rxBytes = 0
     this.txBytes = 0
@@ -38,6 +92,7 @@ class BufferedThrottleStream extends Duplex {
       write: (data, cb) => this.__write(false, data, cb),
       predestroy: () => { nextTick(() => this.destroyed || this.destroy()) }
     })
+
     this.bufferA = new FIFO()
     this.bufferB = new FIFO()
     // Monkey patch peek method.
@@ -58,12 +113,14 @@ class BufferedThrottleStream extends Duplex {
     }
   }
 
-  tick (deltaTime) {
+  tick (iteration, deltaTime, bandwidthBudget) {
     // if (!this.bufferA.isEmpty || !this.bufferB.isEmpty()) debugger
     // Process rx
+    this.maxRate = 102400
     let rx = 0
     let tx = 0
-    this.budgetRx += (deltaTime / 1000) * this.maxRate
+    this.budgetRx += (deltaTime / 1000) * this.maxRate // TODO: use bandwidthBudget
+
     while (!this.bufferA.isEmpty() &&
       this.bufferA.peek().data.length < this.budgetRx) {
       const { data, cb } = this.bufferA.shift()
@@ -91,17 +148,13 @@ class BufferedThrottleStream extends Duplex {
   }
 }
 
-class HyperswarmSim {
+class SimulatedSwarm {
   constructor (signal) {
     this.vdht = {}
     this.connections = {}
-    this.signal = (type, ev, extras) => {
-      signal(type, ev, { time: this.time, iteration: this.iteration, ...extras })
-    }
+    this.signal = signal
     this.pending = 0
     this._discoverLimit = 5
-    this.iteration = 0
-    this.time = 0
   }
 
   join (topic, id, handler) {
@@ -141,9 +194,7 @@ class HyperswarmSim {
     dst.handler({ stream: stream.b, initiating: false, leave: () => this.leave(topic, dst) })
   }
 
-  tick (deltaTime) {
-    this.time += deltaTime
-    this.iteration++
+  tick (iteration, deltaTime) {
     const summary = {
       delta: deltaTime,
       pending: this.pending,
@@ -170,12 +221,13 @@ class HyperswarmSim {
     for (const v of Object.values(this.connections)) {
       for (const { stream, src, dst } of Object.values(v)) {
         summary.connections++
-        const { rx, tx } = stream.tick(deltaTime)
+        const { rx, tx } = stream.tick(iteration, deltaTime)
         this.signal('socket', 'tick', { src: src.id, dst: dst.id, rx, tx })
         sumBand += rx + tx
       }
     }
     summary.rate = deltaTime ? Math.ceil(sumBand / (deltaTime / 1000)) : -1
+    // TODO: add memory consumption to metrics
     this.signal('simulator', 'tick', summary)
   }
 
@@ -215,14 +267,20 @@ class HyperswarmSim {
   }
 }
 
-class HyperSim {
+class Simulator {
   constructor (opts = {}) {
     this.poolPath = opts.poolPath || join(__dirname, '_cache')
     this._idCtr = 0
     this._logger = opts.logger || console.log
-    this._swarm = new HyperswarmSim(this._signal.bind(this))
-    this._transition(INIT, { swarm: 'hypersim' })
+    this._swarm = new SimulatedSwarm(this._signal.bind(this))
+    this.time = 0
+    this.iteration = 0
+    this.sessionId = new Date().getTime()
     this.run = this.run.bind(this)
+    this.peers = []
+    this._transition(INIT, {
+      swarm: 'hypersim'
+    })
   }
 
   _transition (newState, ...extra) {
@@ -247,7 +305,9 @@ class HyperSim {
         this.pending++
         const id = ++this._idCtr
         const storage = f => raf(join(this.poolPath, String(id), f))
-        this._signal('peer', 'init', { name: role.name, id })
+        const peer = new SimulatedPeer(id, this._signal.bind(this), {
+          initFn: role.initFn
+        }, role)
         let didEnd = false
 
         role.initFn({
@@ -260,17 +320,26 @@ class HyperSim {
           }
         }, err => {
           if (didEnd) return console.error('WARNING!: `end` invoked more than once by:', role.name, id)
-          this._signal('peer', 'end', { name: role.name, id, error: err })
+          peer._end()
           this._swarm._destoyConnectionsOf(id)
+          this.peers.splice(this.peers.indexOf(peer), 1)
           didEnd = true
           if (!--this.pending) this._transition(FINISHED)
         })
+        this.peers.push(peer)
       }
     }
   }
 
-  _signal (type, ev, payload) {
-    this._logger({ type, event: ev, ...payload })
+  _signal (type, ev, payload = {}) {
+    this._logger({
+      type,
+      event: ev,
+      ...payload,
+      time: this.time,
+      iteration: this.iteration,
+      sessionId: this.sessionId
+    })
   }
 
   run (speed = 0.1, interval = 500) {
@@ -281,11 +350,20 @@ class HyperSim {
         await defer(d => setTimeout(d, interval))
         const time = new Date().getTime()
         const deltaTime = (time - timeLastRun) * speed
-        this._swarm.tick(deltaTime) // if is hyperswarmSim
+        this._tick(deltaTime)
         timeLastRun = time
       }
       done()
     }).then(() => this.teardown())
+  }
+
+  _tick (deltaTime) {
+    this.iteration++
+    this.time += deltaTime
+    // TODO: move peer & socket pumping here instead of SimulatedSwarm.
+    // it's a prerequestie to get any kind of metrics when using a real swarm.
+    // move global tick-report here as well.
+    this._swarm.tick(this.iteration, deltaTime) // if is hyperswarmSim
   }
 
   async teardown () {
@@ -293,4 +371,4 @@ class HyperSim {
     await defer(done => rimraf(this.poolPath, done))
   }
 }
-module.exports = HyperSim
+module.exports = Simulator
