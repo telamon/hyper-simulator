@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-const hypercore = require('hypercore')
 const raf = require('random-access-file')
 const { defer } = require('deferinfer')
 const { mkdirSync, statSync } = require('fs')
@@ -7,6 +6,8 @@ const { join } = require('path')
 const { Duplex } = require('streamx')
 const rimraf = require('rimraf')
 const FIFO = require('fast-fifo')
+const { EventEmitter } = require('events')
+const { nextTick } = require('process')
 
 const INIT = 'init'
 const RUNNING = 'running'
@@ -16,12 +17,16 @@ function peekPatch () {
   return this.tail.buffer[this.tail.btm]
 }
 
-class BufferedThrottleStream {
+class BufferedThrottleStream extends Duplex {
   /**
    * @param linkRate {Number} - max allowed bytes per second (default: 1Mbit)
    * @param latency {Number} - Link latency in ms
    */
   constructor (linkRate = 102400, latency = 100) {
+    super({
+      write: (data, cb) => this.__write(true, data, cb),
+      predestroy: () => { nextTick(() => this.b.destroyed || this.b.destroy()) }
+    })
     this.maxRate = linkRate
     this.latency = latency
     this.rxBytes = 0
@@ -29,14 +34,9 @@ class BufferedThrottleStream {
     this.budgetRx = 0
     this.budgetTx = 0
 
-    this.a = new Duplex({
-      write: (data, cb) => this.__write(true, data, cb),
-      predestroy: () => this.b.destroy()
-
-    })
     this.b = new Duplex({
       write: (data, cb) => this.__write(false, data, cb),
-      predestroy: () => this.a.destroy()
+      predestroy: () => { nextTick(() => this.destroyed || this.destroy()) }
     })
     this.bufferA = new FIFO()
     this.bufferB = new FIFO()
@@ -47,7 +47,7 @@ class BufferedThrottleStream {
 
   __write (dir, data, cb) {
     if (data === null) {
-      const s = dir ? this.b : this.a
+      const s = dir ? this.b : this
       s.push(null)
       cb()
     } else {
@@ -70,7 +70,7 @@ class BufferedThrottleStream {
       if (this.budgetRx > this.maxRate) this.budgetRx = 0
       else this.budgetRx -= data.length
       rx += data.length
-      this.a.push(data)
+      this.push(data)
       cb(null)
     }
 
@@ -95,7 +95,6 @@ class HyperswarmSim {
   constructor (signal) {
     this.vdht = {}
     this.connections = {}
-    this._ctr = 0
     this.signal = (type, ev, extras) => {
       signal(type, ev, { time: this.time, iteration: this.iteration, ...extras })
     }
@@ -105,12 +104,12 @@ class HyperswarmSim {
     this.time = 0
   }
 
-  join (topic, handler) {
+  join (topic, id, handler) {
     if (Buffer.isBuffer(topic)) topic = topic.toString('utf8')
-    const vrecord = this.vdht[topic] = this.vdht[topic] || []
-    const vpeer = { id: String(++this._ctr), handler }
-    vrecord.push(vpeer)
-    return () => this._leave(topic, vpeer)
+    const vtable = this.vdht[topic] = this.vdht[topic] || []
+    const vrecord = { id, handler }
+    vtable.push(vrecord)
+    return () => this._leave(topic, vrecord)
   }
 
   _leave (topic, vpeer) {
@@ -127,18 +126,18 @@ class HyperswarmSim {
   _simulatePeerConnection (src, dst, topic) {
     const sig = this.signal
     const streamId = `${src.id}:${dst.id}`
-    sig('socket', 'open', { id: streamId, src: src.id, dst: dst.id })
+    sig('socket', 'open', { id: streamId, src: src.id, dst: dst.id, state: 'CONNECTING' })
     const stream = new BufferedThrottleStream()
 
-    stream.a.once('finish', () => {
-      debugger
-      sig('socket', 'end', { id: streamId, src: src.id, dst: dst.id })
+    stream.once('close', () => {
+      sig('socket', 'close', { id: streamId, src: src.id, dst: dst.id, state: 'DESTROYED' })
+      delete this.connections[src.id][dst.id]
     })
 
     if (!this.connections[src.id]) this.connections[src.id] = {}
     this.connections[src.id][dst.id] = { id: streamId, stream, src, dst }
 
-    src.handler({ stream: stream.a, initiating: true, leave: () => this.leave(topic, src) })
+    src.handler({ stream: stream, initiating: true, leave: () => this.leave(topic, src) })
     dst.handler({ stream: stream.b, initiating: false, leave: () => this.leave(topic, dst) })
   }
 
@@ -160,11 +159,12 @@ class HyperswarmSim {
           if (src === dst) continue
           if (!this._isConnected(src, dst)) {
             this._simulatePeerConnection(src, dst, topic)
-            if (!--limit) return // end tick if discovery limit reached
+            if (!--limit) break // end discovery connection limit reached
           }
         }
       }
     }
+
     let sumBand = 0
     // Pump the simulated sockets
     for (const v of Object.values(this.connections)) {
@@ -177,6 +177,41 @@ class HyperswarmSim {
     }
     summary.rate = deltaTime ? Math.ceil(sumBand / (deltaTime / 1000)) : -1
     this.signal('simulator', 'tick', summary)
+  }
+
+  _destoyConnectionsOf (id) {
+    if (!this.connections[id]) return
+    for (const { stream } of Object.values(this.connections[id])) {
+      if (!stream.destroyed) stream.destroy()
+    }
+  }
+
+  async close () {
+    for (const v of Object.values(this.connections)) {
+      for (const { stream } of Object.values(v)) {
+        if (!stream.destroyed) stream.destroy()
+      }
+    }
+  }
+
+  boundInterface (peerId) {
+    const swarm = this
+    const bound = Object.assign(new EventEmitter(), {
+      id: peerId,
+      topics: {},
+      join (topic, opts) {
+        this.topics[topic] = {
+          announce: typeof opts.announce !== 'undefined' ? opts.announce : true,
+          lookup: typeof opts.announce !== 'undefined' ? opts.lookup : true
+        }
+        // TODO: implement above options
+        swarm.join(topic, this.id, ({ stream, initiating, leave }) => {
+          this.emit('connection', stream, { client: initiating })
+        })
+      }
+    })
+
+    return bound
   }
 }
 
@@ -214,17 +249,19 @@ class HyperSim {
         const storage = f => raf(join(this.poolPath, String(id), f))
         this._signal('peer', 'init', { name: role.name, id })
         let didEnd = false
+
         role.initFn({
           id,
           name: role.name,
           storage,
-          swarm: this._swarm,
+          swarm: this._swarm.boundInterface(id), // TODO: alternatively support a real instance of hyperswarm
           signal: (ev, args) => {
             this._signal('app', ev, { ...args, name: role.name, id })
           }
         }, err => {
-          if (didEnd) throw new Error('End called more than once')
+          if (didEnd) return console.error('WARNING!: `end` invoked more than once by:', role.name, id)
           this._signal('peer', 'end', { name: role.name, id, error: err })
+          this._swarm._destoyConnectionsOf(id)
           didEnd = true
           if (!--this.pending) this._transition(FINISHED)
         })
@@ -251,8 +288,9 @@ class HyperSim {
     }).then(() => this.teardown())
   }
 
-  teardown () {
-    return defer(done => rimraf(this.poolPath, done))
+  async teardown () {
+    await this._swarm.close()
+    await defer(done => rimraf(this.poolPath, done))
   }
 }
 module.exports = HyperSim

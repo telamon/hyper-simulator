@@ -5,24 +5,34 @@ const HyperSim = require('..')
 let redKey = null
 let blueKey = null
 function noop () {}
-test('simulated sockets', async t => {
+test.only('simulated sockets', async t => {
   t.plan(4)
   try {
-    const sim = new HyperSim({ logger: noop })
+    const sim = new HyperSim({
+      logger: noop
+    })
+
     await sim.setup([
       {
         name: 'seed',
         count: 1,
         initFn ({ swarm, signal, name }, end) {
           let pending = 1
-          swarm.join('topic', ({ stream, initiating, leave }) => {
-            stream.once('close', () => {
+
+          swarm.join('topic', {
+            lookup: false, // find & connect to peers
+            announce: true // optional- announce self as a connection target
+          })
+
+          swarm.once('connection', (socket, details) => {
+            socket.once('close', () => {
+              // t.equal(detail.client, false, 'Initiating boolean available')
               if (!--pending) t.notOk(end(), 'Seed stream closed')
             })
-            stream.once('data', chunk => {
+            socket.once('data', chunk => {
               t.equal(chunk.toString(), 'hey seed', 'Leech msg received')
-              stream.write('Yo leech!')
-              stream.end()
+              socket.write('Yo leech!')
+              // stream.end()
             })
           })
         }
@@ -31,15 +41,19 @@ test('simulated sockets', async t => {
         name: 'leech',
         count: 1,
         initFn ({ swarm, signal, name }, end) {
-          swarm.join('topic', ({ stream, initiating, leave }) => {
-            stream.once('data', chunk => {
+          swarm.join('topic', {
+            lookup: true, // find & connect to peers
+            announce: true // optional- announce self as a connection target
+          })
+          swarm.once('connection', (socket, details) => {
+            socket.once('data', chunk => {
               t.equal(chunk.toString(), 'Yo leech!', 'Seed msg received')
-              stream.destroy()
+              socket.destroy()
             })
-            stream.once('close', () => {
+            socket.once('close', () => {
               t.notOk(end(), 'Leech stream closed')
             })
-            stream.write('hey seed')
+            socket.write('hey seed')
           })
         }
       }
@@ -49,13 +63,16 @@ test('simulated sockets', async t => {
     t.end()
   } catch (err) { t.error(err) }
 })
-test.skip('Basic hypercore simulation', t => {
+
+test('Basic hypercore simulation', t => {
   try {
-    const simulation = new HyperSim()
+    const simulation = new HyperSim({
+      logger: line => console.error(JSON.stringify(line))
+    })
     simulation
       .setup([
         { name: 'red', initFn: SimulatedPeer, count: 4, firewalled: 0.7 },
-        { name: 'blue', initFn: SimulatedPeer, count: 0, receivers: 0.9 }
+        { name: 'blue', initFn: SimulatedPeer, count: 12, receivers: 0.9 }
       ])
       .then(() => simulation.run())
       .then(() => console.log('Simulation finished'))
