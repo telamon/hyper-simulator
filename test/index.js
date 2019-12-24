@@ -9,7 +9,7 @@ test.only('simulated sockets', async t => {
   t.plan(4)
   try {
     const sim = new HyperSim({
-      logger: line => console.error(JSON.stringify(line)) //  noop
+      logger: line => console.error(JSON.stringify(line))
     })
 
     await sim.setup([

@@ -92,7 +92,7 @@ class BufferedThrottleStream extends Duplex {
    * @param linkRate {Number} - max allowed bytes per second (default: 1Mbit)
    * @param latency {Number} - Link latency in ms
    */
-  constructor (src, dst, latency = 100) {
+  constructor (src, dst) {
     super({
       write: (data, cb) => this.__write(true, data, cb),
       predestroy: () => { nextTick(() => this.out.destroyed || this.out.destroy()) }
@@ -102,7 +102,8 @@ class BufferedThrottleStream extends Duplex {
     this.dst = dst
 
     this.lastTick = 0
-    this.latency = latency
+    this.carryRx = 0
+    this.carryTx = 0
     this.rxBytes = 0
     this.txBytes = 0
     this.budgetRx = 0
@@ -133,36 +134,63 @@ class BufferedThrottleStream extends Duplex {
     }
   }
 
-  tick (iteration, deltaTime, bandwidthBudget) {
+  tick (iteration, deltaTime, budget) {
     // Process rx
-    this.maxRate = 102400
     let rx = 0
     let tx = 0
-    this.budgetRx += (deltaTime / 1000) * this.maxRate // TODO: use bandwidthBudget
+    let rxDone = false
+    let txDone = false
+    while (!rxDone || !txDone) {
+      // Process receives
+      if (!rxDone) {
+        if (this.bufferA.isEmpty()) {
+          rxDone = true
+        } else {
+          let n = this.bufferA.peek().data.length
+          if (n > budget + this.carryRx) {
+            this.carryRx += budget
+            rx += budget
+            budget = 0
+            rxDone = true
+          } else {
+            n -= this.carryRx
+            this.carryRx = 0
+            budget -= n
+            rx += n
+            const { data, cb } = this.bufferA.shift()
+            this.push(data)
+            cb(null)
+          }
+        }
+      }
 
-    while (!this.bufferA.isEmpty() &&
-      this.bufferA.peek().data.length < this.budgetRx) {
-      const { data, cb } = this.bufferA.shift()
-      if (this.budgetRx > this.maxRate) this.budgetRx = 0
-      else this.budgetRx -= data.length
-      rx += data.length
-      this.push(data)
-      cb(null)
+      // Process transmits
+      if (!txDone) {
+        if (this.bufferB.isEmpty()) {
+          txDone = true
+        } else {
+          let n = this.bufferB.peek().data.length
+          if (n > budget + this.carryTx) {
+            this.carryTx += budget
+            tx += budget
+            budget = 0
+            txDone = true
+          } else {
+            n -= this.carryTx
+            this.carryTx = 0
+            budget -= n
+            tx += n
+            const { data, cb } = this.bufferB.shift()
+            this.out.push(data)
+            cb(null)
+          }
+        }
+      }
     }
 
-    // Process tx
-    this.budgetTx += (deltaTime / 1000) * this.maxRate
-    while (!this.bufferB.isEmpty() &&
-      this.bufferB.peek().data.length < this.budgetTx) {
-      const { data, cb } = this.bufferB.shift()
-      if (this.budgetTx > this.maxRate) this.budgetTx = 0
-      else this.budgetTx -= data.length
-      tx += data.length
-      this.out.push(data)
-      cb(null)
-    }
     this.rxBytes += rx
     this.txBytes += tx
+    this.lastTick = iteration
     return { rx, tx }
   }
 }
@@ -385,21 +413,36 @@ class Simulator {
       peers: this.peers.length
     }
 
-    let sumBand = 0
+    let consumedBandwidth = 0
+    const budgets = {}
+
+    const swarmBandwidthCapacity = this.peers.reduce((sum, p) => {
+      budgets[p.id] = p.linkRate * deltaTime / 1000
+      return sum + budgets[p.id]
+    }, 0)
 
     // Pump the simulated sockets
     for (const peer of this.peers) {
       peer.tick(iteration, deltaTime)
       for (const socket of peer.sockets) {
-        summary.connections++
+        const { src, dst } = socket
+        if (socket.lastTick >= iteration) continue
+        const budget = Math.min(budgets[src.id], budgets[dst.id])
         debugger
-        const { rx, tx } = socket.tick(iteration, deltaTime)
-        this._signal('socket', 'tick', { src: src.id, dst: dst.id, rx, tx })
-        sumBand += rx + tx
+        // We're simplifying budgets for sockets, treating them
+        // as if they're all half-duplex.
+        const { rx, tx } = socket.tick(iteration, deltaTime, budget)
+        const load = (rx + tx) / budget
+        this._signal('socket', 'tick', { src: src.id, dst: dst.id, rx, tx, load })
+        budgets[src.id] -= rx + tx
+        budgets[dst.id] -= rx + tx
+        consumedBandwidth += rx + tx
+        summary.connections++
       }
     }
-
-    summary.rate = deltaTime ? Math.ceil(sumBand / (deltaTime / 1000)) : -1
+    summary.capacity = swarmBandwidthCapacity
+    summary.rate = deltaTime ? Math.ceil(consumedBandwidth / (deltaTime / 1000)) : -1
+    if (swarmBandwidthCapacity > 0) summary.load = summary.rate / swarmBandwidthCapacity
     // TODO: add memory consumption to metrics
     this._signal('simulator', 'tick', summary)
   }
