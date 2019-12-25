@@ -87,6 +87,7 @@ class SimulatedPeer {
   }
 }
 
+let sckCtr = 0
 class BufferedThrottleStream extends Duplex {
   /**
    * @param linkRate {Number} - max allowed bytes per second (default: 1Mbit)
@@ -94,10 +95,17 @@ class BufferedThrottleStream extends Duplex {
    */
   constructor (src, dst) {
     super({
-      write: (data, cb) => this.__write(true, data, cb),
-      predestroy: () => { nextTick(() => this.out.destroyed || this.out.destroy()) }
+      write: (data, cb) => this.__write(true, data, cb)
     })
-    this.id = `${src.id}:${dst.id}`
+
+    this.out = new Duplex({
+      write: (data, cb) => this.__write(false, data, cb),
+      final: cb => this._final(cb, true)
+    })
+    // this.on('pipe', (stream) => s.on('destroy')) // TODO:
+    // this.out.on('pipe', __finalize)
+
+    this.id = `${sckCtr++}.${src.id}.${dst.id}`
     this.src = src
     this.dst = dst
 
@@ -109,11 +117,6 @@ class BufferedThrottleStream extends Duplex {
     this.budgetRx = 0
     this.budgetTx = 0
 
-    this.out = new Duplex({
-      write: (data, cb) => this.__write(false, data, cb),
-      predestroy: () => { nextTick(() => this.destroyed || this.destroy()) }
-    })
-
     this.bufferA = new FIFO()
     this.bufferB = new FIFO()
     // Monkey patch peek method.
@@ -121,17 +124,14 @@ class BufferedThrottleStream extends Duplex {
     this.bufferB.peek = peekPatch.bind(this.bufferB)
   }
 
+  _final (callback, remote) {
+    this.__write(!remote, null, callback)
+  }
+
   __write (dir, data, cb) {
-    if (data === null) {
-      const s = dir ? this.out : this
-      s.push(null)
-      cb()
-    } else {
-      setTimeout(() => {
-        const buffer = dir ? this.bufferB : this.bufferA
-        buffer.push({ data, cb })
-      }, this.latency)
-    }
+    const buffer = dir ? this.bufferB : this.bufferA
+    buffer.push(data)
+    cb(null)
   }
 
   tick (iteration, deltaTime, budget) {
@@ -145,8 +145,12 @@ class BufferedThrottleStream extends Duplex {
       if (!rxDone) {
         if (this.bufferA.isEmpty()) {
           rxDone = true
+        } else if (this.bufferA.peek() === null) {
+          this.bufferA.shift()
+          this.push(null)
+          rxDone = true
         } else {
-          let n = this.bufferA.peek().data.length
+          let n = this.bufferA.peek().length
           if (n > budget + this.carryRx) {
             this.carryRx += budget
             rx += budget
@@ -157,9 +161,8 @@ class BufferedThrottleStream extends Duplex {
             this.carryRx = 0
             budget -= n
             rx += n
-            const { data, cb } = this.bufferA.shift()
+            const data = this.bufferA.shift()
             this.push(data)
-            cb(null)
           }
         }
       }
@@ -168,8 +171,12 @@ class BufferedThrottleStream extends Duplex {
       if (!txDone) {
         if (this.bufferB.isEmpty()) {
           txDone = true
+        } else if (this.bufferB.peek() === null) {
+          this.bufferB.shift()
+          this.out.push(null)
+          txDone = true
         } else {
-          let n = this.bufferB.peek().data.length
+          let n = this.bufferB.peek().length
           if (n > budget + this.carryTx) {
             this.carryTx += budget
             tx += budget
@@ -180,9 +187,8 @@ class BufferedThrottleStream extends Duplex {
             this.carryTx = 0
             budget -= n
             tx += n
-            const { data, cb } = this.bufferB.shift()
+            const data = this.bufferB.shift()
             this.out.push(data)
-            cb(null)
           }
         }
       }
@@ -225,6 +231,8 @@ class SimulatedSwarm {
       if (iteration <= record.lastTick + 1) continue
       for (const tkey of Object.keys(record.topics)) {
         const topic = record.topics[tkey]
+        if (!topic.lookup) continue
+
         // Find candidates
         this.records
           .filter(r => r !== record &&
@@ -249,11 +257,7 @@ class SimulatedSwarm {
   }
 
   async close () {
-    for (const v of Object.values(this.connections)) {
-      for (const { stream } of Object.values(v)) {
-        if (!stream.destroyed) stream.destroy()
-      }
-    }
+    // TOOD: Not Implemented
   }
 
   boundInterface (peer) {
@@ -264,7 +268,7 @@ class SimulatedSwarm {
       maxDiscover: 3, // Per tick TODO: move this some where else.
       topics: {},
 
-      join (topic, opts) {
+      join (topic, opts = {}) {
         topic = topic.toString()
         this.topics[topic] = {
           announce: typeof opts.announce !== 'undefined' ? opts.announce : true,
@@ -296,8 +300,10 @@ class SimulatedSwarm {
       // crudely connect the peers if they don't already share
       // a connections
       if (bound.peer.isConnected(can.record.peer)) return
+      if (bound.peer.isPoolFull) return
+
       bound.connect(can, (err, socket, details) => {
-        if (err) return swarm._signal('connection-failed', err)
+        if (err) return swarm.signal('socket', 'connection-failed', { err: err.message })
         bound.emit('connection', socket, details)
         can.record.emit('connection', socket.out, {
           client: false,
@@ -311,8 +317,9 @@ class SimulatedSwarm {
   }
 }
 
-class Simulator {
+class Simulator extends EventEmitter {
   constructor (opts = {}) {
+    super()
     this.poolPath = opts.poolPath || join(__dirname, '_cache')
     this._idCtr = 0
     this._logger = opts.logger || console.log
@@ -355,6 +362,7 @@ class Simulator {
         let didEnd = false
 
         role.initFn({
+          ...role,
           id,
           name: role.name,
           storage,
@@ -428,12 +436,11 @@ class Simulator {
         const { src, dst } = socket
         if (socket.lastTick >= iteration) continue
         const budget = Math.min(budgets[src.id], budgets[dst.id])
-        debugger
         // We're simplifying budgets for sockets, treating them
         // as if they're all half-duplex.
         const { rx, tx } = socket.tick(iteration, deltaTime, budget)
         const load = (rx + tx) / budget
-        this._signal('socket', 'tick', { src: src.id, dst: dst.id, rx, tx, load })
+        this._signal('socket', 'tick', { id: socket.id, src: src.id, dst: dst.id, rx, tx, load })
         budgets[src.id] -= rx + tx
         budgets[dst.id] -= rx + tx
         consumedBandwidth += rx + tx
@@ -445,6 +452,7 @@ class Simulator {
     if (swarmBandwidthCapacity > 0) summary.load = summary.rate / swarmBandwidthCapacity
     // TODO: add memory consumption to metrics
     this._signal('simulator', 'tick', summary)
+    this.emit('tick', summary)
   }
 
   _purgeStorage () {
