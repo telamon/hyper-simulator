@@ -18,7 +18,7 @@ function peekPatch () {
 }
 
 class SimulatedPeer {
-  constructor (id, signal, handlers = {}, opts = {}) {
+  constructor (id, signal, opts = {}) {
     this.id = id
     this.name = opts.name
     this.linkRate = opts.linkRate || 102400
@@ -27,13 +27,14 @@ class SimulatedPeer {
     this.sockets = []
     this.lastTick = 0
     this.age = 0
+    this._consumed = { rx: 0, tx: 0 }
     this.finished = false
-    this._signal = (ev, payload) => signal('peer', ev, {
+    this._signal = (ev, payload = {}) => signal('peer', ev, {
       id,
       name: this.name,
       ...payload
     })
-    this._signal('init', {})
+    this._signal('init')
   }
 
   isConnected (peer) {
@@ -53,10 +54,23 @@ class SimulatedPeer {
   tick (iteration, delta) {
     this.age++
     this.lastTick = iteration
+    const { rx, tx } = this._consumed
+    this._consumed = { rx: 0, tx: 0 }
+    this._signal('tick', {
+      rx,
+      tx,
+      load: (rx + tx) / (this.linkRate * delta / 1000),
+      state: this.finished ? 'done' : 'active'
+    })
   }
 
   get isPoolFull () {
     return !(this.sockets.length < this.maxConnections)
+  }
+
+  _inccon (rx, tx) {
+    this._consumed.rx += rx
+    this._consumed.tx += tx
   }
 
   _end (error) {
@@ -105,7 +119,7 @@ class BufferedThrottleStream extends Duplex {
     // this.on('pipe', (stream) => s.on('destroy')) // TODO:
     // this.out.on('pipe', __finalize)
 
-    this.id = `${sckCtr++}.${src.id}.${dst.id}`
+    this.id = `${sckCtr++}#${src.id}:${dst.id}`
     this.src = src
     this.dst = dst
 
@@ -270,6 +284,7 @@ class SimulatedSwarm {
 
       join (topic, opts = {}) {
         topic = topic.toString()
+        this.maxDiscover = opts.maxPeers || 24
         this.topics[topic] = {
           announce: typeof opts.announce !== 'undefined' ? opts.announce : true,
           lookup: typeof opts.announce !== 'undefined' ? opts.lookup : true,
@@ -357,8 +372,7 @@ class Simulator extends EventEmitter {
         this.pending++
         const id = ++this._idCtr
         const storage = f => raf(join(this.poolPath, String(id), f))
-        const peer = new SimulatedPeer(id, this._signal.bind(this), {
-        }, role)
+        const peer = new SimulatedPeer(id, this._signal.bind(this), role)
         let didEnd = false
 
         role.initFn({
@@ -431,7 +445,6 @@ class Simulator extends EventEmitter {
 
     // Pump the simulated sockets
     for (const peer of this.peers) {
-      peer.tick(iteration, deltaTime)
       for (const socket of peer.sockets) {
         const { src, dst } = socket
         if (socket.lastTick >= iteration) continue
@@ -444,8 +457,11 @@ class Simulator extends EventEmitter {
         budgets[src.id] -= rx + tx
         budgets[dst.id] -= rx + tx
         consumedBandwidth += rx + tx
+        src._inccon(rx, tx)
+        dst._inccon(rx, tx)
         summary.connections++
       }
+      peer.tick(iteration, deltaTime)
     }
     summary.capacity = swarmBandwidthCapacity
     summary.rate = deltaTime ? Math.ceil(consumedBandwidth / (deltaTime / 1000)) : -1

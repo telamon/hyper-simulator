@@ -2,6 +2,7 @@ const test = require('tape')
 const hypercore = require('hypercore')
 const ram = require('random-access-memory')
 const HyperSim = require('..')
+const { randomBytes } = require('crypto')
 
 function noop () {}
 test('simulated sockets', async t => {
@@ -66,7 +67,7 @@ test('simulated sockets', async t => {
 test.only('Basic hypercore simulation', t => {
   const { keyPair } = require('hypercore-crypto')
   const { publicKey, secretKey } = keyPair()
-  const nLeeches = 1
+  const nLeeches = 20
   try {
     const simulation = new HyperSim({
       logger: line => console.error(JSON.stringify(line))
@@ -77,10 +78,10 @@ test.only('Basic hypercore simulation', t => {
     })
     simulation
       .setup([
-        { name: 'seed', initFn: SimulatedPeer, count: 1, publicKey, secretKey },
+        { name: 'seed', initFn: SimulatedPeer, count: 1, publicKey, secretKey, linkRate: 56 << 8 },
         { name: 'leech', initFn: SimulatedPeer, count: nLeeches, publicKey }
       ])
-      .then(() => simulation.run(0.1, 200))
+      .then(() => simulation.run(1, 200))
       .then(() => console.log('Simulation finished'))
       .then(t.end)
       .catch(t.end)
@@ -90,10 +91,13 @@ test.only('Basic hypercore simulation', t => {
   let pending = nLeeches
   function SimulatedPeer (opts, end) {
     const { storage, swarm, signal, id, name, publicKey, secretKey } = opts
-    const feed = hypercore(ram, publicKey, { secretKey })
+    const feed = hypercore(storage, publicKey, { secretKey })
 
     function setupSwarm () {
-      swarm.join(Buffer.from('mTopic'))
+      swarm.join(Buffer.from('mTopic'), {
+        lookup: name === 'leech',
+        maxPeers: 5
+      })
 
       swarm.once('connection', (socket, details) => {
         const protoStream = feed.replicate(details.client)
@@ -115,16 +119,16 @@ test.only('Basic hypercore simulation', t => {
         })
         setupSwarm()
       } else {
-        // Append some content to first feed.
-        feed.append(Buffer.from(`N:${name},ID:${id}`), err => {
-          signal('block0', { err })
-          if (err) return end(err)
-          feed.append(Buffer.from(`Hello ${Math.random()}`), err => {
-            signal('block1', { err })
+        let pending = 45
+        const appendRandom = () => {
+          feed.append(randomBytes(256), err => {
             if (err) return end(err)
-            setupSwarm()
+            signal('append', { seq: feed.length })
+            if (!--pending) setupSwarm()
+            else appendRandom()
           })
-        })
+        }
+        appendRandom()
       }
     })
   }
