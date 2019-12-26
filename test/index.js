@@ -64,7 +64,7 @@ test('simulated sockets', async t => {
   } catch (err) { t.error(err) }
 })
 
-test.only('Basic hypercore simulation', t => {
+test('Basic hypercore simulation', t => {
   const { keyPair } = require('hypercore-crypto')
   const { publicKey, secretKey } = keyPair()
   const nLeeches = 20

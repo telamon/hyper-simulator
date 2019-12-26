@@ -59,8 +59,12 @@ class SimulatedPeer {
     this._signal('tick', {
       rx,
       tx,
+      maxConnections: this.maxConnections,
+      connectionCount: this.sockets.length,
+      linkRate: this.linkRate,
       load: (rx + tx) / (this.linkRate * delta / 1000),
-      state: this.finished ? 'done' : 'active'
+      state: this.finished ? 'done' : 'active',
+      age: this.age
     })
   }
 
@@ -468,7 +472,7 @@ class Simulator extends EventEmitter {
     if (swarmBandwidthCapacity > 0) summary.load = summary.rate / swarmBandwidthCapacity
     // TODO: add memory consumption to metrics
     this._signal('simulator', 'tick', summary)
-    this.emit('tick', summary)
+    this.emit('tick', iteration, summary)
   }
 
   _purgeStorage () {
