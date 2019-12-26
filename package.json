@@ -1,6 +1,6 @@
 {
   "name": "hyper-simulator",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "p2p swarm-simulator to test and benchmark decentralized applications",
   "main": "index.js",
   "files": [
@@ -32,7 +32,13 @@
     "type": "git",
     "url": "git+https://github.com/decentstack/hyper-simulator.git"
   },
-  "keywords": ["swarm", "simulator", "test", "benchmark", "p2p"],
+  "keywords": [
+    "swarm",
+    "simulator",
+    "test",
+    "benchmark",
+    "p2p"
+  ],
   "author": {
     "name": "Tony Ivanov",
     "email": "telamohn@pm.me"
