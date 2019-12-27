@@ -5,7 +5,7 @@ const { randomBytes } = require('crypto')
 
 function noop () {}
 
-test('simulated sockets', async t => {
+test.skip('simulated sockets', async t => {
   t.plan(4)
   try {
     const sim = new HyperSim({
@@ -64,7 +64,7 @@ test('simulated sockets', async t => {
   } catch (err) { t.error(err) }
 })
 
-test('Basic hypercore simulation', t => {
+test.skip('Basic hypercore simulation', t => {
   const { keyPair } = require('hypercore-crypto')
   const { publicKey, secretKey } = keyPair()
   const nLeeches = 20
