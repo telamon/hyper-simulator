@@ -3,20 +3,15 @@ const raf = require('random-access-file')
 const { defer } = require('deferinfer')
 const { mkdirSync, statSync } = require('fs')
 const { join } = require('path')
-const { Duplex } = require('streamx')
 const rimraf = require('rimraf')
-const FIFO = require('fast-fifo')
 const { EventEmitter } = require('events')
+const BufferedThrottleStream = require('./lib/throttled-stream')
 const { nextTick } = require('process')
 const hyperswarm = require('hyperswarm')
 
 const INIT = 'init'
 const RUNNING = 'running'
 const FINISHED = 'finished'
-
-function peekPatch () {
-  return this.tail.buffer[this.tail.btm]
-}
 
 class SimulatedPeer {
   constructor (id, signal, opts = {}) {
@@ -47,7 +42,10 @@ class SimulatedPeer {
     if (this.isPoolFull || peer.isPoolFull) return callback(new Error('Connection Pool Exhausted'))
     // Maybe just return false and silently abort on already connected.
     if (this.isConnected(peer)) return callback(new Error('Already connected'))
-    const socket = new BufferedThrottleStream(this, peer)
+    const socket = new BufferedThrottleStream()
+    socket.id = `${sckCtr++}#${this.id}:${peer.id}`
+    socket.src = this
+    socket.dst = peer
     this._accept(socket, true)
     peer._accept(socket, false)
     return callback(null, socket)
@@ -136,120 +134,10 @@ class SimulatedPeer {
 }
 
 let sckCtr = 0
-class BufferedThrottleStream extends Duplex {
-  /**
-   * @param linkRate {Number} - max allowed bytes per second (default: 1Mbit)
-   * @param latency {Number} - Link latency in ms
-   */
-  constructor (src, dst) {
-    super({
-      write: (data, cb) => this.__write(true, data, cb)
-    })
-
-    this.out = new Duplex({
-      write: (data, cb) => this.__write(false, data, cb),
-      final: cb => this._final(cb, true)
-    })
-
-    this.id = `${sckCtr++}#${src.id}:${dst.id}`
-    this.src = src
-    this.dst = dst
-
-    this.lastTick = 0
-    this.carryRx = 0
-    this.carryTx = 0
-    this.rxBytes = 0
-    this.txBytes = 0
-    this.budgetRx = 0
-    this.budgetTx = 0
-
-    this.bufferA = new FIFO()
-    this.bufferB = new FIFO()
-    // Monkey patch peek method.
-    this.bufferA.peek = peekPatch.bind(this.bufferA)
-    this.bufferB.peek = peekPatch.bind(this.bufferB)
-  }
-
-  _final (callback, remote) {
-    this.__write(!remote, null, callback)
-  }
-
-  __write (dir, data, cb) {
-    const buffer = dir ? this.bufferB : this.bufferA
-    buffer.push(data)
-    cb(null)
-  }
-
-  tick (iteration, deltaTime, budget) {
-    // Process rx
-    let rx = 0
-    let tx = 0
-    let rxDone = false
-    let txDone = false
-    while (!rxDone || !txDone) {
-      // Process receives
-      if (!rxDone) {
-        if (this.bufferA.isEmpty()) {
-          rxDone = true
-        } else if (this.bufferA.peek() === null) {
-          this.bufferA.shift()
-          this.push(null)
-          rxDone = true
-        } else {
-          let n = this.bufferA.peek().length
-          if (n > budget + this.carryRx) {
-            this.carryRx += budget
-            rx += budget
-            budget = 0
-            rxDone = true
-          } else {
-            n -= this.carryRx
-            this.carryRx = 0
-            budget -= n
-            rx += n
-            const data = this.bufferA.shift()
-            this.push(data)
-          }
-        }
-      }
-
-      // Process transmits
-      if (!txDone) {
-        if (this.bufferB.isEmpty()) {
-          txDone = true
-        } else if (this.bufferB.peek() === null) {
-          this.bufferB.shift()
-          this.out.push(null)
-          txDone = true
-        } else {
-          let n = this.bufferB.peek().length
-          if (n > budget + this.carryTx) {
-            this.carryTx += budget
-            tx += budget
-            budget = 0
-            txDone = true
-          } else {
-            n -= this.carryTx
-            this.carryTx = 0
-            budget -= n
-            tx += n
-            const data = this.bufferB.shift()
-            this.out.push(data)
-          }
-        }
-      }
-    }
-
-    this.rxBytes += rx
-    this.txBytes += tx
-    this.lastTick = iteration
-    return { rx, tx }
-  }
-}
-
 class SimulatedSwarm {
   constructor (signal) {
     this.records = []
+    this.listeningPeers = {}
     this.signal = signal
     this._discoverLimit = 5
     // this.addrSpace = { 43: Peer, 24: Peer }
@@ -289,6 +177,27 @@ class SimulatedSwarm {
 
   async close () {
     // TOOD: Not Implemented
+  }
+
+  networkFor (peer) {
+    const simnet = this
+    const mockProto = {
+      get maxConnections () { return peer.maxConnections },
+      set maxConnections (v) { peer.maxConnections = v }
+    }
+    return {
+      tcp: mockProto,
+      utp: mockProto,
+      bind (port, callback) {
+        if (typeof port === 'function') return this.bind(null, port)
+        simnet.listeningPeers[peer.id] = peer
+        callback(null)
+      },
+      _domain: (key) => ({ foo: 'bar' }),
+      _domains: {
+        get: (d) => ({ kek: 'bork' })
+      }
+    }
   }
 }
 
@@ -399,7 +308,7 @@ class Simulator extends EventEmitter {
         const budget = Math.min(budgets[src.id], budgets[dst.id])
         // We're simplifying budgets for sockets, treating them
         // as if they're all half-duplex.
-        const { rx, tx } = socket.tick(iteration, deltaTime, budget)
+        const { rx, tx } = socket.tick(iteration, budget)
         const load = (rx + tx) / budget
         this._signal('socket', 'tick', { id: socket.id, src: src.id, dst: dst.id, rx, tx, load })
         budgets[src.id] -= rx + tx
@@ -429,3 +338,4 @@ class Simulator extends EventEmitter {
   }
 }
 module.exports = Simulator
+module.exports.BufferedThrottleStream = BufferedThrottleStream

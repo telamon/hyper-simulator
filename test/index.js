@@ -1,11 +1,11 @@
 const test = require('tape')
 const hypercore = require('hypercore')
-const ram = require('random-access-memory')
 const HyperSim = require('..')
 const { randomBytes } = require('crypto')
 
 function noop () {}
-test.only('simulated sockets', async t => {
+
+test('simulated sockets', async t => {
   t.plan(4)
   try {
     const sim = new HyperSim({
