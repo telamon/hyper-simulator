@@ -1,15 +1,15 @@
 const test = require('tape')
 const hypercore = require('hypercore')
-const ram = require('random-access-memory')
 const HyperSim = require('..')
 const { randomBytes } = require('crypto')
 
 function noop () {}
-test('simulated sockets', async t => {
+
+test('Discovery & Transmission', async t => {
   t.plan(4)
   try {
     const sim = new HyperSim({
-      logger: line => console.error(JSON.stringify(line))
+      logger: noop // line => console.error(JSON.stringify(line))
     })
 
     await sim.setup([
@@ -19,7 +19,7 @@ test('simulated sockets', async t => {
         initFn ({ swarm, signal, name }, end) {
           let pending = 1
 
-          swarm.join('topic', {
+          swarm.join(Buffer.from('stub-topic'), {
             lookup: false, // find & connect to peers
             announce: true // optional- announce self as a connection target
           })
@@ -41,7 +41,7 @@ test('simulated sockets', async t => {
         name: 'leech',
         count: 1,
         initFn ({ swarm, signal, name }, end) {
-          swarm.join('topic', {
+          swarm.join(Buffer.from('stub-topic'), {
             lookup: true, // find & connect to peers
             announce: true // optional- announce self as a connection target
           })
@@ -64,7 +64,7 @@ test('simulated sockets', async t => {
   } catch (err) { t.error(err) }
 })
 
-test('Basic hypercore simulation', t => {
+test.skip('Basic hypercore simulation', t => {
   const { keyPair } = require('hypercore-crypto')
   const { publicKey, secretKey } = keyPair()
   const nLeeches = 20
@@ -88,15 +88,16 @@ test('Basic hypercore simulation', t => {
   } catch (e) {
     t.end(e)
   }
+
   let pending = nLeeches
   function SimulatedPeer (opts, end) {
-    const { storage, swarm, signal, id, name, publicKey, secretKey } = opts
+    const { storage, swarm, signal, name, publicKey, secretKey } = opts
     const feed = hypercore(storage, publicKey, { secretKey })
 
     function setupSwarm () {
       swarm.join(Buffer.from('mTopic'), {
         lookup: name === 'leech',
-        maxPeers: 5
+        announce: true
       })
 
       swarm.once('connection', (socket, details) => {

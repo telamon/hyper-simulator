@@ -1,21 +1,40 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
+const requireInject = require('require-inject')
 const raf = require('random-access-file')
 const { defer } = require('deferinfer')
 const { mkdirSync, statSync } = require('fs')
 const { join } = require('path')
-const { Duplex } = require('streamx')
 const rimraf = require('rimraf')
-const FIFO = require('fast-fifo')
 const { EventEmitter } = require('events')
-const { nextTick } = require('process')
+const BufferedThrottleStream = require('./lib/throttled-stream')
+const sos = require('save-our-sanity')
+const hyperswarm = require('hyperswarm')
+const debug = require('debug')('hypersim')
+
+const { NetworkResource } = requireInject('@hyperswarm/network', {
+  net: sos({
+    createServer: () => sos({
+      on (ev, handler) { }
+    }, 'net.createServer'),
+    connect (port, host) {
+      // TODO: if we wanna go the injection way then
+      // this object that is returned here needs to be bound
+      // to the peer. but at this point time we do not know which
+      // peer.simnet it is that calls it.
+      return sos({ on (ev, handler) { } }, 'net.connect')
+    }
+  }, 'net'),
+
+  'utp-native': () => sos({
+    on (ev, handler) { }
+  }, 'utp-native')
+})
+// const { NetworkResource } = require('@hyperswarm/network')
+
 
 const INIT = 'init'
 const RUNNING = 'running'
 const FINISHED = 'finished'
-
-function peekPatch () {
-  return this.tail.buffer[this.tail.btm]
-}
 
 class SimulatedPeer {
   constructor (id, signal, opts = {}) {
@@ -34,6 +53,7 @@ class SimulatedPeer {
       name: this.name,
       ...payload
     })
+    this._rootSignal = signal
     this._signal('init')
   }
 
@@ -45,7 +65,10 @@ class SimulatedPeer {
     if (this.isPoolFull || peer.isPoolFull) return callback(new Error('Connection Pool Exhausted'))
     // Maybe just return false and silently abort on already connected.
     if (this.isConnected(peer)) return callback(new Error('Already connected'))
-    const socket = new BufferedThrottleStream(this, peer)
+    const socket = new BufferedThrottleStream()
+    socket.id = `${sckCtr++}#${this.id}:${peer.id}`
+    socket.src = this
+    socket.dst = peer
     this._accept(socket, true)
     peer._accept(socket, false)
     return callback(null, socket)
@@ -78,6 +101,7 @@ class SimulatedPeer {
   }
 
   _end (error) {
+    if (this.finished) return console.error('WARNING!: `end` invoked more than once by:', this.name, this.id)
     this.finished = true
     this._signal('end', { error })
   }
@@ -88,141 +112,118 @@ class SimulatedPeer {
     socket.once('close', () => {
       const idx = this.sockets.indexOf(socket)
       if (idx !== -1) this.sockets.splice(idx, 1)
-      //this._signal('disconnect', {
-      //  src: this.peer.id,
-      //  dst: this.remotePeer.id,
-      //  sid
-      //})
+      // this._signal('disconnect', {
+      //   src: this.peer.id,
+      //   dst: this.remotePeer.id,
+      //   sid
+      // })
     })
 
     this.sockets.push(socket)
-    //this._signal(initiator ? 'connect' : 'accept', {
-    //  src: this.peer.id,
-    //  dst: remotePeer.id,
-    //  sid: socket.id
-    //})
+    // this._signal(initiator ? 'connect' : 'accept', {
+    //   src: this.peer.id,
+    //   dst: remotePeer.id,
+    //   sid: socket.id
+    // })
     return true
+  }
+
+  bootstrap (storage, simnet, behaviour) {
+    this.storage = storage
+    this.behaviour = behaviour
+    if (simnet) {
+      this.simnet = simnet
+      this.swarm = hyperswarm({ network: new SimulatedNetwork(simnet, this) })
+    } else {
+      this.swarm = hyperswarm() // this._swarm.boundInterface(peer), // TODO: alternatively support a real instance of hyperswarm
+    }
+
+    return defer(async done => {
+      behaviour.initFn({
+        ...behaviour,
+        id: this.id,
+        name: behaviour.name,
+        storage,
+        swarm: this.swarm,
+        signal: (ev, args) => {
+          this._rootSignal('custom', ev, { ...args, name: behaviour.name, id: this.id })
+        }
+      }, err => {
+        this._end(err || null)
+        // this._swarm._destoyConnectionsOf(id)
+        done()
+      })
+    })
+  }
+}
+
+class SimulatedNetwork extends NetworkResource {
+  constructor (simnet, peer) {
+    super({})
+    this.simnet = simnet
+    this.peer = peer
+    const mockUTP = Object.assign(new EventEmitter(), {
+      get maxConnections () { return peer.maxConnections },
+      set maxConnections (v) { peer.maxConnections = v },
+      send (buffer, offset, size, port, host) {
+        // if (host === '__mockBootstrap')
+      }
+    })
+
+    const mockTCP = Object.assign(new EventEmitter(), {
+      get maxConnections () { return peer.maxConnections },
+      set maxConnections (v) { peer.maxConnections = v },
+      address () { return { address: `peer_${peer.id}`, port: peer.id } },
+      connect (dst, handler, ...opts) {
+        debugger
+      }
+    })
+
+    this.tcp = sos(mockTCP, 'tcp-stack')
+    this.utp = sos(mockUTP, 'utp-stack')
+  }
+
+  /* Simulated Discovery */
+  get discovery () {
+    const peer = this.peer
+    const stub = {
+      _domains: new Map(),
+      _domain: k => k.slice(0, 20).toString() + '.hypersim',
+      announce (topic, opts, callback) {
+        // Peer is now discoverable
+        console.log(`======= Peer ${peer.id} is discoverable on ${topic.toString()} =====`)
+        // a stubbed topic object.
+        return sos({
+          on (ev, cb) {
+            // 'peer' , on peer discovered
+            // 'update' ???
+            if (ev === 'update') debugger
+            if (ev === 'peer') console.log(`======= Peer ${peer.id} lookups ${topic.toString()} =====`)
+          }
+        }, 'topic-handle')
+      }
+      /* lookup (topic, opts, callback) { } */
+    }
+    return sos(stub, 'discovery')
+  }
+
+  // writeprotect disco-sim
+  set discovery (v) { }
+
+  bind (port, callback) {
+    if (typeof port === 'function') return this.bind(null, port)
+    // Peer is connectable.
+    console.log(`======= Peer ${this.peer.id} is listening/connectable =====`)
+    this.simnet.listeningPeers[this.peer.id] = this.peer
+    callback(null)
   }
 }
 
 let sckCtr = 0
-class BufferedThrottleStream extends Duplex {
-  /**
-   * @param linkRate {Number} - max allowed bytes per second (default: 1Mbit)
-   * @param latency {Number} - Link latency in ms
-   */
-  constructor (src, dst) {
-    super({
-      write: (data, cb) => this.__write(true, data, cb)
-    })
-
-    this.out = new Duplex({
-      write: (data, cb) => this.__write(false, data, cb),
-      final: cb => this._final(cb, true)
-    })
-    // this.on('pipe', (stream) => s.on('destroy')) // TODO:
-    // this.out.on('pipe', __finalize)
-
-    this.id = `${sckCtr++}#${src.id}:${dst.id}`
-    this.src = src
-    this.dst = dst
-
-    this.lastTick = 0
-    this.carryRx = 0
-    this.carryTx = 0
-    this.rxBytes = 0
-    this.txBytes = 0
-    this.budgetRx = 0
-    this.budgetTx = 0
-
-    this.bufferA = new FIFO()
-    this.bufferB = new FIFO()
-    // Monkey patch peek method.
-    this.bufferA.peek = peekPatch.bind(this.bufferA)
-    this.bufferB.peek = peekPatch.bind(this.bufferB)
-  }
-
-  _final (callback, remote) {
-    this.__write(!remote, null, callback)
-  }
-
-  __write (dir, data, cb) {
-    const buffer = dir ? this.bufferB : this.bufferA
-    buffer.push(data)
-    cb(null)
-  }
-
-  tick (iteration, deltaTime, budget) {
-    // Process rx
-    let rx = 0
-    let tx = 0
-    let rxDone = false
-    let txDone = false
-    while (!rxDone || !txDone) {
-      // Process receives
-      if (!rxDone) {
-        if (this.bufferA.isEmpty()) {
-          rxDone = true
-        } else if (this.bufferA.peek() === null) {
-          this.bufferA.shift()
-          this.push(null)
-          rxDone = true
-        } else {
-          let n = this.bufferA.peek().length
-          if (n > budget + this.carryRx) {
-            this.carryRx += budget
-            rx += budget
-            budget = 0
-            rxDone = true
-          } else {
-            n -= this.carryRx
-            this.carryRx = 0
-            budget -= n
-            rx += n
-            const data = this.bufferA.shift()
-            this.push(data)
-          }
-        }
-      }
-
-      // Process transmits
-      if (!txDone) {
-        if (this.bufferB.isEmpty()) {
-          txDone = true
-        } else if (this.bufferB.peek() === null) {
-          this.bufferB.shift()
-          this.out.push(null)
-          txDone = true
-        } else {
-          let n = this.bufferB.peek().length
-          if (n > budget + this.carryTx) {
-            this.carryTx += budget
-            tx += budget
-            budget = 0
-            txDone = true
-          } else {
-            n -= this.carryTx
-            this.carryTx = 0
-            budget -= n
-            tx += n
-            const data = this.bufferB.shift()
-            this.out.push(data)
-          }
-        }
-      }
-    }
-
-    this.rxBytes += rx
-    this.txBytes += tx
-    this.lastTick = iteration
-    return { rx, tx }
-  }
-}
-
 class SimulatedSwarm {
   constructor (signal) {
     this.records = []
-    this.connections = {}
+    this.listeningPeers = {}
     this.signal = signal
     this._discoverLimit = 5
     // this.addrSpace = { 43: Peer, 24: Peer }
@@ -235,13 +236,6 @@ class SimulatedSwarm {
   _unregister (record) {
     const idx = this.records.indexOf(record)
     if (idx !== -1) this.records.splice(idx, 1)
-  }
-
-  _isConnected (a, b) {
-    return !!(
-      (this.connections[a.id] && this.connections[a.id][b.id]) ||
-      (this.connections[b.id] && this.connections[b.id][a.id])
-    )
   }
 
   tick (iteration, deltaTime) {
@@ -267,72 +261,8 @@ class SimulatedSwarm {
     }
   }
 
-  _destoyConnectionsOf (id) {
-    if (!this.connections[id]) return
-    for (const { stream } of Object.values(this.connections[id])) {
-      if (!stream.destroyed) stream.destroy()
-    }
-  }
-
   async close () {
     // TOOD: Not Implemented
-  }
-
-  boundInterface (peer) {
-    const swarm = this
-    const bound = Object.assign(new EventEmitter(), {
-      peer: peer,
-      lastTick: 0,
-      maxDiscover: 3, // Per tick TODO: move this some where else.
-      topics: {},
-
-      join (topic, opts = {}) {
-        topic = topic.toString()
-        this.maxDiscover = opts.maxPeers || 24
-        this.topics[topic] = {
-          announce: typeof opts.announce !== 'undefined' ? opts.announce : true,
-          lookup: typeof opts.announce !== 'undefined' ? opts.lookup : true,
-          candidates: []
-        }
-        swarm.register(this)
-      },
-
-      connect (candidate, callback) {
-        this.peer.connect(candidate.record.peer, (err, socket) => {
-          if (err) return callback(err)
-
-          callback(null, socket, {
-            client: true,
-            peer: candidate.record.peer,
-            type: 'simulated'
-          })
-        })
-      },
-
-      leave (topic) {
-        delete this.topics[topic]
-      }
-    })
-
-    bound.on('peer', can => {
-      bound.topics[can.topic.toString()].candidates.push(can.record.peer)
-      // crudely connect the peers if they don't already share
-      // a connections
-      if (bound.peer.isConnected(can.record.peer)) return
-      if (bound.peer.isPoolFull) return
-
-      bound.connect(can, (err, socket, details) => {
-        if (err) return swarm.signal('socket', 'connection-failed', { err: err.message })
-        bound.emit('connection', socket, details)
-        can.record.emit('connection', socket.out, {
-          client: false,
-          peer: bound.peer,
-          type: 'simulated'
-        })
-      })
-    })
-
-    return bound
   }
 }
 
@@ -342,7 +272,7 @@ class Simulator extends EventEmitter {
     this.poolPath = opts.poolPath || join(__dirname, '_cache')
     this._idCtr = 0
     this._logger = opts.logger || console.log
-    this._swarm = new SimulatedSwarm(this._signal.bind(this))
+    this._swarmNetwork = new SimulatedSwarm(this._signal.bind(this))
     this.time = 0
     this.iteration = 0
     this.sessionId = new Date().getTime()
@@ -371,31 +301,18 @@ class Simulator extends EventEmitter {
       this._signal('simulator', 'create-cache', { path: this.poolPath })
     }
 
-    for (const role of scenario) {
-      for (let n = 0; n < role.count; n++) {
+    for (const behaviour of scenario) {
+      for (let n = 0; n < behaviour.count; n++) {
         this.pending++
         const id = ++this._idCtr
         const storage = f => raf(join(this.poolPath, String(id), f))
-        const peer = new SimulatedPeer(id, this._signal.bind(this), role)
-        let didEnd = false
-
-        role.initFn({
-          ...role,
-          id,
-          name: role.name,
-          storage,
-          swarm: this._swarm.boundInterface(peer), // TODO: alternatively support a real instance of hyperswarm
-          signal: (ev, args) => {
-            this._signal('custom', ev, { ...args, name: role.name, id })
-          }
-        }, err => {
-          if (didEnd) return console.error('WARNING!: `end` invoked more than once by:', role.name, id)
-          peer._end(err || null)
-          this._swarm._destoyConnectionsOf(id)
-          this.peers.splice(this.peers.indexOf(peer), 1)
-          didEnd = true
-          if (!--this.pending) this._transition(FINISHED)
-        })
+        // TODO: implement random-access-metered
+        const peer = new SimulatedPeer(id, this._signal.bind(this), behaviour)
+        peer.bootstrap(storage, this._swarmNetwork, behaviour)
+          .then(() => {
+            this.peers.splice(this.peers.indexOf(peer), 1)
+            if (!--this.pending) this._transition(FINISHED)
+          })
         this.peers.push(peer)
       }
     }
@@ -431,7 +348,8 @@ class Simulator extends EventEmitter {
     const iteration = ++this.iteration
     this.time += deltaTime
 
-    this._swarm.tick(iteration, deltaTime) // if is hyperswarmSim
+    this._swarmNetwork.tick(iteration, deltaTime) // if is hyperswarmSim
+
     const summary = {
       delta: deltaTime,
       pending: this.pending,
@@ -455,7 +373,7 @@ class Simulator extends EventEmitter {
         const budget = Math.min(budgets[src.id], budgets[dst.id])
         // We're simplifying budgets for sockets, treating them
         // as if they're all half-duplex.
-        const { rx, tx } = socket.tick(iteration, deltaTime, budget)
+        const { rx, tx } = socket.tick(iteration, budget)
         const load = (rx + tx) / budget
         this._signal('socket', 'tick', { id: socket.id, src: src.id, dst: dst.id, rx, tx, load })
         budgets[src.id] -= rx + tx
@@ -480,8 +398,10 @@ class Simulator extends EventEmitter {
   }
 
   async teardown () {
-    await this._swarm.close()
+    await this._swarmNetwork.close()
     await this._purgeStorage()
   }
 }
+
 module.exports = Simulator
+module.exports.BufferedThrottleStream = BufferedThrottleStream
