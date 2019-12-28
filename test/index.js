@@ -5,11 +5,11 @@ const { randomBytes } = require('crypto')
 
 function noop () {}
 
-test.skip('simulated sockets', async t => {
+test('Discovery & Transmission', async t => {
   t.plan(4)
   try {
     const sim = new HyperSim({
-      logger: line => console.error(JSON.stringify(line))
+      logger: noop // line => console.error(JSON.stringify(line))
     })
 
     await sim.setup([
@@ -19,7 +19,7 @@ test.skip('simulated sockets', async t => {
         initFn ({ swarm, signal, name }, end) {
           let pending = 1
 
-          swarm.join(Buffer.from('topic'), {
+          swarm.join(Buffer.from('stub-topic'), {
             lookup: false, // find & connect to peers
             announce: true // optional- announce self as a connection target
           })
@@ -41,7 +41,7 @@ test.skip('simulated sockets', async t => {
         name: 'leech',
         count: 1,
         initFn ({ swarm, signal, name }, end) {
-          swarm.join(Buffer.from('topic'), {
+          swarm.join(Buffer.from('stub-topic'), {
             lookup: true, // find & connect to peers
             announce: true // optional- announce self as a connection target
           })

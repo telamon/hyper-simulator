@@ -204,6 +204,11 @@ bulk-write-stream@^1.1.3:
     inherits "^2.0.1"
     readable-stream "^2.1.4"
 
+caller@^1.0.1:
+  version "1.0.1"
+  resolved "https://registry.yarnpkg.com/caller/-/caller-1.0.1.tgz#b851860f70e195db3d277395aa1a7e23ea30ecf5"
+  integrity sha1-uFGGD3Dhlds9J3OVqhp+I+ow7PU=
+
 callsites@^3.0.0:
   version "3.1.0"
   resolved "https://registry.yarnpkg.com/callsites/-/callsites-3.1.0.tgz#b3630abd8943432f54b3f0519238e33cd7df2f73"
@@ -1657,6 +1662,13 @@ regexpp@^3.0.0:
   resolved "https://registry.yarnpkg.com/regexpp/-/regexpp-3.0.0.tgz#dd63982ee3300e67b41c1956f850aa680d9d330e"
   integrity sha512-Z+hNr7RAVWxznLPuA7DIh8UNX1j9CDrUQxskw9IrBE1Dxue2lyXT+shqEIeLUjrokxIP8CMy1WkjgG3rTsd5/g==
 
+require-inject@^1.4.4:
+  version "1.4.4"
+  resolved "https://registry.yarnpkg.com/require-inject/-/require-inject-1.4.4.tgz#ac9859035296ad167975a58fd1ccf52c8f355cdf"
+  integrity sha512-5Y5ctRN84+I4iOZO61gm+48tgP/6Hcd3VZydkaEM3MCuOvnHRsTJYQBOc01faI/Z9at5nsCAJVHhlfPA6Pc0Og==
+  dependencies:
+    caller "^1.0.1"
+
 resolve-from@^4.0.0:
   version "4.0.0"
   resolved "https://registry.yarnpkg.com/resolve-from/-/resolve-from-4.0.0.tgz#4abcd852ad32dd7baabfe9b40e00a36db5f392e6"
@@ -1738,6 +1750,13 @@ safe-buffer@~5.1.0, safe-buffer@~5.1.1:
   version "2.1.2"
   resolved "https://registry.yarnpkg.com/safer-buffer/-/safer-buffer-2.1.2.tgz#44fa161b0187b9549dd84bb91802f9bd8385cd6a"
   integrity sha512-YZo3K82SD7Riyi0E1EQPojLz7kpepnSQI9IyPbHHg1XXXevb5dJI7tpyN2ADxGcQbHG7vcyRHk0cbwqcQriUtg==
+
+save-our-sanity@^1.0.1:
+  version "1.0.1"
+  resolved "https://registry.yarnpkg.com/save-our-sanity/-/save-our-sanity-1.0.1.tgz#dba664429648c760f7e8be5ab3944668351b771e"
+  integrity sha512-cISMo5TTEO4JjF/cT1gYl21qd2b9TONHKXc7WUhOW0YgUAtRzoiusP+cotbgdGkW1ONAGdRMckkmHR9jhpA6Mg==
+  dependencies:
+    debug "^4.1.1"
 
 "semver@2 || 3 || 4 || 5", semver@^5.5.0:
   version "5.7.1"

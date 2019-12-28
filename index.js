@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
+const requireInject = require('require-inject')
 const raf = require('random-access-file')
 const { defer } = require('deferinfer')
 const { mkdirSync, statSync } = require('fs')
@@ -6,8 +7,30 @@ const { join } = require('path')
 const rimraf = require('rimraf')
 const { EventEmitter } = require('events')
 const BufferedThrottleStream = require('./lib/throttled-stream')
-const { nextTick } = require('process')
+const sos = require('save-our-sanity')
 const hyperswarm = require('hyperswarm')
+const debug = require('debug')('hypersim')
+
+const { NetworkResource } = requireInject('@hyperswarm/network', {
+  net: sos({
+    createServer: () => sos({
+      on (ev, handler) { }
+    }, 'net.createServer'),
+    connect (port, host) {
+      // TODO: if we wanna go the injection way then
+      // this object that is returned here needs to be bound
+      // to the peer. but at this point time we do not know which
+      // peer.simnet it is that calls it.
+      return sos({ on (ev, handler) { } }, 'net.connect')
+    }
+  }, 'net'),
+
+  'utp-native': () => sos({
+    on (ev, handler) { }
+  }, 'utp-native')
+})
+// const { NetworkResource } = require('@hyperswarm/network')
+
 
 const INIT = 'init'
 const RUNNING = 'running'
@@ -85,19 +108,19 @@ class SimulatedPeer {
     socket.once('close', () => {
       const idx = this.sockets.indexOf(socket)
       if (idx !== -1) this.sockets.splice(idx, 1)
-      //this._signal('disconnect', {
-      //  src: this.peer.id,
-      //  dst: this.remotePeer.id,
-      //  sid
-      //})
+      // this._signal('disconnect', {
+      //   src: this.peer.id,
+      //   dst: this.remotePeer.id,
+      //   sid
+      // })
     })
 
     this.sockets.push(socket)
-    //this._signal(initiator ? 'connect' : 'accept', {
-    //  src: this.peer.id,
-    //  dst: remotePeer.id,
-    //  sid: socket.id
-    //})
+    // this._signal(initiator ? 'connect' : 'accept', {
+    //   src: this.peer.id,
+    //   dst: remotePeer.id,
+    //   sid: socket.id
+    // })
     return true
   }
 
@@ -106,10 +129,7 @@ class SimulatedPeer {
     this.behaviour = behaviour
     if (simnet) {
       this.simnet = simnet
-      // TODO: create an adapter for @hyperswarm/network
-      // that invokes peer.maxConnections / peer.bind() peer.connect()
-      // and those methods should interact with the simulator's network-stack
-      this.swarm = hyperswarm({ network: simnet.networkFor(this) })
+      this.swarm = hyperswarm({ network: new SimulatedNetwork(simnet, this) })
     } else {
       this.swarm = hyperswarm() // this._swarm.boundInterface(peer), // TODO: alternatively support a real instance of hyperswarm
     }
@@ -130,6 +150,68 @@ class SimulatedPeer {
         done()
       })
     })
+  }
+}
+
+class SimulatedNetwork extends NetworkResource {
+  constructor (simnet, peer) {
+    super({})
+    this.simnet = simnet
+    this.peer = peer
+    const mockUTP = Object.assign(new EventEmitter(), {
+      get maxConnections () { return peer.maxConnections },
+      set maxConnections (v) { peer.maxConnections = v },
+      send (buffer, offset, size, port, host) {
+        // if (host === '__mockBootstrap')
+      }
+    })
+
+    const mockTCP = Object.assign(new EventEmitter(), {
+      get maxConnections () { return peer.maxConnections },
+      set maxConnections (v) { peer.maxConnections = v },
+      address () { return { address: `peer_${peer.id}`, port: peer.id } },
+      connect (dst, handler, ...opts) {
+        debugger
+      }
+    })
+
+    this.tcp = sos(mockTCP, 'tcp-stack')
+    this.utp = sos(mockUTP, 'utp-stack')
+  }
+
+  /* Simulated Discovery */
+  get discovery () {
+    const peer = this.peer
+    const stub = {
+      _domains: new Map(),
+      _domain: k => k.slice(0, 20).toString() + '.hypersim',
+      announce (topic, opts, callback) {
+        // Peer is now discoverable
+        console.log(`======= Peer ${peer.id} is discoverable on ${topic.toString()} =====`)
+        // a stubbed topic object.
+        return sos({
+          on (ev, cb) {
+            // 'peer' , on peer discovered
+            // 'update' ???
+            if (ev === 'update') debugger
+            if (ev === 'peer') console.log(`======= Peer ${peer.id} lookups ${topic.toString()} =====`)
+          }
+        }, 'topic-handle')
+      }
+      /* lookup (topic, opts, callback) { } */
+    }
+    return sos(stub, 'discovery')
+  }
+
+  // writeprotect disco-sim
+  set discovery (v) { }
+
+  bind (port, callback) {
+    if (typeof port === 'function') return this.bind(null, port)
+    // Peer is connectable.
+    console.log(`======= Peer ${this.peer.id} is listening/connectable =====`)
+    this.simnet.listeningPeers[this.peer.id] = this.peer
+    callback(null)
   }
 }
 
@@ -177,27 +259,6 @@ class SimulatedSwarm {
 
   async close () {
     // TOOD: Not Implemented
-  }
-
-  networkFor (peer) {
-    const simnet = this
-    const mockProto = {
-      get maxConnections () { return peer.maxConnections },
-      set maxConnections (v) { peer.maxConnections = v }
-    }
-    return {
-      tcp: mockProto,
-      utp: mockProto,
-      bind (port, callback) {
-        if (typeof port === 'function') return this.bind(null, port)
-        simnet.listeningPeers[peer.id] = peer
-        callback(null)
-      },
-      _domain: (key) => ({ foo: 'bar' }),
-      _domains: {
-        get: (d) => ({ kek: 'bork' })
-      }
-    }
   }
 }
 
@@ -337,5 +398,6 @@ class Simulator extends EventEmitter {
     await this._purgeStorage()
   }
 }
+
 module.exports = Simulator
 module.exports.BufferedThrottleStream = BufferedThrottleStream
