@@ -54,7 +54,7 @@ class SimulatedPeer {
     socket.dst = peer
     const x = this._accept(socket, true)
     const y = peer._accept(socket, false)
-    if (!(x && y)) debugger
+    if (!(x && y)) debugger // This shouldn't ever happen
     return callback(null, socket)
   }
 
@@ -100,24 +100,19 @@ class SimulatedPeer {
     this._signal('end', { error })
   }
 
+  _removeSocket (socket) {
+    const idx = this.sockets.indexOf(socket)
+    if (idx !== -1) this.sockets.splice(idx, 1)
+    // this._signal('disconnect', {
+    //   src: this.peer.id,
+    //   dst: this.remotePeer.id,
+    //   sid
+    // })
+  }
+
   _accept (socket, initiator) {
     if (this.isPoolFull) return false
-
-    socket.once('close', () => {
-      const idx = this.sockets.indexOf(socket)
-      if (idx !== -1) this.sockets.splice(idx, 1)
-      // this._signal('disconnect', {
-      //   src: this.peer.id,
-      //   dst: this.remotePeer.id,
-      //   sid
-      // })
-    })
-
     this.sockets.push(socket)
-    if (this.hasSimSwarm) {
-      this.boundSwarm.emit('connection', sos(socket, 'sock'), { client: initiator })
-    }
-
     return true
   }
 
@@ -193,6 +188,9 @@ class BoundSwarm extends EventEmitter {
           // Attempt to connect
           this.peer.connect(peer, (err, socket) => {
             if (err) return this.peerQueue.push(n)
+            this.emit('connection', socket, { client: true })
+            peer.boundSwarm.emit('connection', socket.out, { client: false })
+
             // this.peer.signal(initiator ? 'connect' : 'accept', {
             //   src: this.peer.id,
             //   dst: peer.id,
@@ -226,7 +224,8 @@ class BoundSwarm extends EventEmitter {
   queryLookup () {
     for (const topic of this.joinedTopics) {
       for (const cand of this.dht.getCandiates(topic)) {
-        if (this.banned.indexOf(cand.id) === -1) {
+        if (this.banned.indexOf(cand.id) === -1 &&
+          cand.id !== this.peer.id) {
           this.peerQueue.push({
             lastAttempt: -20000,
             attempts: 10,
@@ -378,10 +377,22 @@ class Simulator extends EventEmitter {
         const budget = Math.min(budgets[src.id], budgets[dst.id])
         // We're simplifying budgets for sockets, treating them
         // as if they're all half-duplex.
-        const { rx, tx, end, noop } = socket.tick(iteration, budget)
+        const stat = socket.tick(iteration, budget)
+        const { rx, tx, noop, rxEnd, txEnd, destroyed } = stat
+        if (rxEnd || destroyed) src._removeSocket(socket)
+        if (txEnd || destroyed) dst._removeSocket(socket)
+
         if (!noop) summary.connections++
         const load = (rx + tx) / budget
-        this._signal('socket', 'tick', { id: socket.id, src: src.id, dst: dst.id, rx, tx, load, ended: end })
+
+        this._signal('socket', 'tick', {
+          ...stat,
+          id: socket.id,
+          src: src.id,
+          dst: dst.id,
+          load
+        })
+
         budgets[src.id] -= rx + tx
         budgets[dst.id] -= rx + tx
         consumedBandwidth += rx + tx

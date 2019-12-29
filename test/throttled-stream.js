@@ -27,14 +27,13 @@ test('Raw transfer, sanityCheck', t => {
   let itr = 0
   const loop = () => {
     if (!pending) {
-      const { end } = sock.tick(itr++, 1000)
-      t.ok(end)
+      const { rxEnd, txEnd } = sock.tick(itr++, 1000)
+      t.ok(rxEnd && txEnd)
       return t.end()
     }
     setTimeout(() => {
-      const { rx, tx, end } = sock.tick(itr++, 1000)
-      if (pending && end) t.notOk(pending)
-      // console.log(rx, tx, end)
+      const { rxEnd, txEnd } = sock.tick(itr++, 1000)
+      if (pending && (rxEnd && txEnd)) t.notOk(pending)
       loop()
     }, 100)
   }
@@ -77,7 +76,7 @@ test('Hypercore replication', t => {
   const loop = () => {
     if (!pending) return assertEnd()
     setTimeout(() => {
-      const { rx, tx } = sock.tick(itr++, 1000)
+      sock.tick(itr++, 1000)
       // console.log(rx, tx)
       loop()
     }, 100)
@@ -85,3 +84,32 @@ test('Hypercore replication', t => {
   loop()
 })
 
+test('Exit states: graceful both sides emit end()', t => {
+  const sock = new BufferedThrottleStream({ id: 'DummySrc' }, { id: 'DummyDst' })
+  sock.autoPump(100)
+    .then(() => t.end(null))
+    .catch(t.error)
+  setTimeout(() => { sock.write('A ending'); sock.end() }, 200)
+  setTimeout(() => { sock.out.write('B ending'); sock.out.end() }, 150)
+})
+
+test('Exit states: remote destroyed no error', t => {
+  const sock = new BufferedThrottleStream({ id: 'DummySrc' }, { id: 'DummyDst' })
+  sock.autoPump(100)
+    .then(() => t.end(null))
+    .catch(t.error)
+  setTimeout(() => { sock.write('A ending') }, 200)
+  setTimeout(() => { sock.out.write('B ending'); sock.out.destroy() }, 200)
+})
+
+test('Exit states: remote destroyed with error', t => {
+  const sock = new BufferedThrottleStream({ id: 'DummySrc' }, { id: 'DummyDst' })
+  sock.autoPump(100)
+    .then(() => t.fail('Promise should not resolve'))
+    .catch(err => {
+      t.equal(err.message, 'bob')
+      t.end()
+    })
+  setTimeout(() => { sock.write('A ending') }, 200)
+  setTimeout(() => { sock.out.write('B ending'); sock.out.destroy(new Error('bob')) }, 200)
+})

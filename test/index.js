@@ -25,17 +25,16 @@ test('Discovery & Transmission', async t => {
           })
 
           swarm.once('connection', (socket, details) => {
-            t.pass('seed onConnection')
+            t.pass('seed onConnection: ' + socket.id)
             socket.once('close', () => {
               // t.equal(detail.client, false, 'Initiating boolean available')
               if (!--pending) t.notOk(end(), 'Seed stream closed')
             })
 
             socket.on('data', chunk => {
-              debugger
               t.equal(chunk.toString(), 'hey seed', 'Leech msg received')
               socket.write('Yo leech!')
-              // stream.end()
+              socket.end()
             })
           })
         }
@@ -49,11 +48,11 @@ test('Discovery & Transmission', async t => {
             announce: true // optional- announce self as a connection target
           })
           swarm.once('connection', (socket, details) => {
-            t.pass('leech onConnection')
+            t.pass('leech onConnection ' + socket.id)
             socket.once('data', chunk => {
-              debugger
               t.equal(chunk.toString(), 'Yo leech!', 'Seed msg received')
-              socket.destroy()
+              socket.end()
+              // socket.destroy()
             })
             socket.once('close', () => {
               t.notOk(end(), 'Leech stream closed')
@@ -72,10 +71,11 @@ test('Discovery & Transmission', async t => {
 test.skip('Basic hypercore simulation', t => {
   const { keyPair } = require('hypercore-crypto')
   const { publicKey, secretKey } = keyPair()
-  const nLeeches = 20
+  const nLeeches = 1
+  const nBlocks = 45
   try {
     const simulation = new HyperSim({
-      logger: line => console.error(JSON.stringify(line))
+      logger: noop // line => console.error(JSON.stringify(line))
     })
 
     simulation.on('tick', sum => {
@@ -109,8 +109,14 @@ test.skip('Basic hypercore simulation', t => {
         const protoStream = feed.replicate(details.client)
 
         socket.once('close', () => {
-          if (name === 'leech') end()
-          else if (!--pending) end()
+          // On leech-connection close, end the peer as soon as
+          // download reached 100%
+          if (name === 'leech' && feed.length === nBlocks) {
+            --pending
+            // end()
+          } else if (pending === 1) { // only the seed is left.
+            end()
+          }
         })
 
         socket.pipe(protoStream).pipe(socket)
@@ -120,17 +126,17 @@ test.skip('Basic hypercore simulation', t => {
     // setup content
     feed.ready(() => {
       if (name !== 'seed') {
-        feed.on('append', seq => {
+        feed.on('append', () => {
           signal('block', { seq: feed.length })
         })
         setupSwarm()
       } else {
-        let pending = 45
+        let pendingInserts = nBlocks
         const appendRandom = () => {
           feed.append(randomBytes(256), err => {
             if (err) return end(err)
             signal('append', { seq: feed.length })
-            if (!--pending) setupSwarm()
+            if (!--pendingInserts) setupSwarm()
             else appendRandom()
           })
         }
