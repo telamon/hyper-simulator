@@ -895,6 +895,14 @@ hypercore@^8.4.0:
   optionalDependencies:
     fd-lock "^1.0.2"
 
+hypersim-parser@^0.0.4:
+  version "0.0.4"
+  resolved "https://registry.yarnpkg.com/hypersim-parser/-/hypersim-parser-0.0.4.tgz#f5fa493429429920ddd94aa1225dea47c55fee63"
+  integrity sha512-DVUlfQIspB4h4foOIIf44PaW8rJoPTejmOUvV5MoHPPsY6X1h/WYHekfmDMF+Z2JVwtbkqMxpym5aXTlf2rS9g==
+  dependencies:
+    lodash "^4.17.15"
+    streamx "^2.5.0"
+
 hyperswarm@^2.4.0:
   version "2.4.0"
   resolved "https://registry.yarnpkg.com/hyperswarm/-/hyperswarm-2.4.0.tgz#efbed6611f7812e5b5e80fd1d4d7b357c56dcd7a"
@@ -1156,7 +1164,7 @@ locate-path@^3.0.0:
     p-locate "^3.0.0"
     path-exists "^3.0.0"
 
-lodash@^4.17.12, lodash@^4.17.14:
+lodash@^4.17.12, lodash@^4.17.14, lodash@^4.17.15:
   version "4.17.15"
   resolved "https://registry.yarnpkg.com/lodash/-/lodash-4.17.15.tgz#b447f6670a0455bbfeedd11392eff330ea097548"
   integrity sha512-8xOcRHvCjnocdS5cpwXQXVzmmh5e5+saE2QGoeQmbKmRS6J3VQppPOIt0MnmE+4xlZoumy0GPG0D0MVIQbNA1A==

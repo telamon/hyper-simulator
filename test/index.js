@@ -68,82 +68,8 @@ test('Discovery & Transmission', async t => {
   } catch (err) { t.error(err) }
 })
 
-test.skip('Basic hypercore simulation', t => {
-  const { keyPair } = require('hypercore-crypto')
-  const { publicKey, secretKey } = keyPair()
-  const nLeeches = 1
-  const nBlocks = 45
-  try {
-    const simulation = new HyperSim({
-      logger: noop // line => console.error(JSON.stringify(line))
-    })
-
-    simulation.on('tick', sum => {
-      // console.log(sum.rate)
-    })
-    simulation
-      .setup([
-        { name: 'seed', initFn: SimulatedPeer, count: 1, publicKey, secretKey, linkRate: 56 << 8 },
-        { name: 'leech', initFn: SimulatedPeer, count: nLeeches, publicKey }
-      ])
-      .then(() => simulation.run(1, 200))
-      .then(() => console.log('Simulation finished'))
-      .then(t.end)
-      .catch(t.end)
-  } catch (e) {
-    t.end(e)
-  }
-
-  let pending = nLeeches
-  function SimulatedPeer (opts, end) {
-    const { storage, swarm, signal, name, publicKey, secretKey } = opts
-    const feed = hypercore(storage, publicKey, { secretKey })
-
-    function setupSwarm () {
-      swarm.join(Buffer.from('mTopic'), {
-        lookup: name === 'leech',
-        announce: true
-      })
-
-      swarm.once('connection', (socket, details) => {
-        const protoStream = feed.replicate(details.client)
-
-        socket.once('close', () => {
-          // On leech-connection close, end the peer as soon as
-          // download reached 100%
-          if (name === 'leech' && feed.length === nBlocks) {
-            --pending
-            // end()
-          } else if (pending === 1) { // only the seed is left.
-            end()
-          }
-        })
-
-        socket.pipe(protoStream).pipe(socket)
-      })
-    }
-
-    // setup content
-    feed.ready(() => {
-      if (name !== 'seed') {
-        feed.on('append', () => {
-          signal('block', { seq: feed.length })
-        })
-        setupSwarm()
-      } else {
-        let pendingInserts = nBlocks
-        const appendRandom = () => {
-          feed.append(randomBytes(256), err => {
-            if (err) return end(err)
-            signal('append', { seq: feed.length })
-            if (!--pendingInserts) setupSwarm()
-            else appendRandom()
-          })
-        }
-        appendRandom()
-      }
-    })
-  }
+test('Basic hypercore simulation', t => {
+  t.end()
 })
 
 /*

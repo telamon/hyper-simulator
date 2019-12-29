@@ -6,6 +6,7 @@ const { join } = require('path')
 const rimraf = require('rimraf')
 const { EventEmitter } = require('events')
 const BufferedThrottleStream = require('./lib/throttled-stream')
+const termAggregator = require('./lib/term-aggregator')
 const sos = require('save-our-sanity')
 const hyperswarm = require('hyperswarm')
 
@@ -204,7 +205,7 @@ class BoundSwarm extends EventEmitter {
     }
   }
 
-  join (topic, { lookup, announce }) {
+  join (topic, { lookup, announce } = {}) {
     this.lookup = lookup
     this.announce = announce
 
@@ -275,7 +276,7 @@ class Simulator extends EventEmitter {
     super()
     this.poolPath = opts.poolPath || join(__dirname, '_cache')
     this._idCtr = 0
-    this._logger = opts.logger || console.log
+    this._logger = opts.logger || termAggregator() || (msg => console.log(JSON.stringify(msg)))
     this._simdht = new SimDHT(this._signal.bind(this))
     this.time = 0
     this.iteration = 0
@@ -355,6 +356,7 @@ class Simulator extends EventEmitter {
     this._simdht.tick(iteration, deltaTime) // if is hyperswarmSim
 
     const summary = {
+      state: this._state,
       delta: deltaTime,
       pending: this.pending,
       connections: 0,
