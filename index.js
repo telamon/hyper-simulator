@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-const requireInject = require('require-inject')
 const raf = require('random-access-file')
 const { defer } = require('deferinfer')
 const { mkdirSync, statSync } = require('fs')
@@ -9,32 +8,13 @@ const { EventEmitter } = require('events')
 const BufferedThrottleStream = require('./lib/throttled-stream')
 const sos = require('save-our-sanity')
 const hyperswarm = require('hyperswarm')
-const debug = require('debug')('hypersim')
-
-const { NetworkResource } = requireInject('@hyperswarm/network', {
-  net: sos({
-    createServer: () => sos({
-      on (ev, handler) { }
-    }, 'net.createServer'),
-    connect (port, host) {
-      // TODO: if we wanna go the injection way then
-      // this object that is returned here needs to be bound
-      // to the peer. but at this point time we do not know which
-      // peer.simnet it is that calls it.
-      return sos({ on (ev, handler) { } }, 'net.connect')
-    }
-  }, 'net'),
-
-  'utp-native': () => sos({
-    on (ev, handler) { }
-  }, 'utp-native')
-})
-// const { NetworkResource } = require('@hyperswarm/network')
-
 
 const INIT = 'init'
 const RUNNING = 'running'
 const FINISHED = 'finished'
+
+// Global socket counter
+let sckCtr = 0
 
 class SimulatedPeer {
   constructor (id, signal, opts = {}) {
@@ -58,7 +38,10 @@ class SimulatedPeer {
   }
 
   isConnected (peer) {
-    return [this.src, this.dst].indexOf(peer) !== -1
+    for (const { src, dst } of this.sockets) {
+      if (src.id === peer.id || dst.id === peer.id) return true
+    }
+    return false
   }
 
   connect (peer, callback) {
@@ -69,16 +52,27 @@ class SimulatedPeer {
     socket.id = `${sckCtr++}#${this.id}:${peer.id}`
     socket.src = this
     socket.dst = peer
-    this._accept(socket, true)
-    peer._accept(socket, false)
+    const x = this._accept(socket, true)
+    const y = peer._accept(socket, false)
+    if (!(x && y)) debugger
     return callback(null, socket)
+  }
+
+  get hasSimSwarm () {
+    return this.boundSwarm && this.boundSwarm.__HYPERSIM__
   }
 
   tick (iteration, delta) {
     this.age++
     this.lastTick = iteration
+
     const { rx, tx } = this._consumed
     this._consumed = { rx: 0, tx: 0 }
+
+    // tick BoundSwarm
+    if (this.hasSimSwarm) this.boundSwarm.tick(iteration, delta)
+
+    // log Peer summary
     this._signal('tick', {
       rx,
       tx,
@@ -120,22 +114,22 @@ class SimulatedPeer {
     })
 
     this.sockets.push(socket)
-    // this._signal(initiator ? 'connect' : 'accept', {
-    //   src: this.peer.id,
-    //   dst: remotePeer.id,
-    //   sid: socket.id
-    // })
+    if (this.hasSimSwarm) {
+      this.boundSwarm.emit('connection', sos(socket, 'sock'), { client: initiator })
+    }
+
     return true
   }
 
-  bootstrap (storage, simnet, behaviour) {
+  bootstrap (storage, simdht, behaviour) {
     this.storage = storage
     this.behaviour = behaviour
-    if (simnet) {
-      this.simnet = simnet
-      this.swarm = hyperswarm({ network: new SimulatedNetwork(simnet, this) })
+    if (simdht) {
+      this.simdht = simdht
+      this.boundSwarm = new BoundSwarm(simdht, this)
     } else {
-      this.swarm = hyperswarm() // this._swarm.boundInterface(peer), // TODO: alternatively support a real instance of hyperswarm
+      // Does this even work?
+      this.boundSwarm = hyperswarm() // this._swarm.boundInterface(peer), // TODO: alternatively support a real instance of hyperswarm
     }
 
     return defer(async done => {
@@ -144,7 +138,7 @@ class SimulatedPeer {
         id: this.id,
         name: behaviour.name,
         storage,
-        swarm: this.swarm,
+        swarm: this.boundSwarm,
         signal: (ev, args) => {
           this._rootSignal('custom', ev, { ...args, name: behaviour.name, id: this.id })
         }
@@ -157,108 +151,119 @@ class SimulatedPeer {
   }
 }
 
-class SimulatedNetwork extends NetworkResource {
-  constructor (simnet, peer) {
-    super({})
-    this.simnet = simnet
+class BoundSwarm extends EventEmitter {
+  get __HYPERSIM__ () { return true }
+  constructor (dht, peer) {
+    super()
+    this.dht = dht
     this.peer = peer
-    const mockUTP = Object.assign(new EventEmitter(), {
-      get maxConnections () { return peer.maxConnections },
-      set maxConnections (v) { peer.maxConnections = v },
-      send (buffer, offset, size, port, host) {
-        // if (host === '__mockBootstrap')
-      }
-    })
-
-    const mockTCP = Object.assign(new EventEmitter(), {
-      get maxConnections () { return peer.maxConnections },
-      set maxConnections (v) { peer.maxConnections = v },
-      address () { return { address: `peer_${peer.id}`, port: peer.id } },
-      connect (dst, handler, ...opts) {
-        debugger
-      }
-    })
-
-    this.tcp = sos(mockTCP, 'tcp-stack')
-    this.utp = sos(mockUTP, 'utp-stack')
+    this.topics = new Map()
+    // Ambitious, but i'd also like to model dropping
+    // connections mid-replicate and observe how that affects the swarm
+    // finding out decentralized services perform in bad link conditions.
+    this.connectFailureRate = 0
+    this.lastLookup = 0
+    this.peerQueue = []
+    this.banned = []
+    this.joinedTopics = []
+    this.age = 0
   }
 
-  /* Simulated Discovery */
-  get discovery () {
-    const peer = this.peer
-    const stub = {
-      _domains: new Map(),
-      _domain: k => k.slice(0, 20).toString() + '.hypersim',
-      announce (topic, opts, callback) {
-        // Peer is now discoverable
-        console.log(`======= Peer ${peer.id} is discoverable on ${topic.toString()} =====`)
-        // a stubbed topic object.
-        return sos({
-          on (ev, cb) {
-            // 'peer' , on peer discovered
-            // 'update' ???
-            if (ev === 'update') debugger
-            if (ev === 'peer') console.log(`======= Peer ${peer.id} lookups ${topic.toString()} =====`)
-          }
-        }, 'topic-handle')
-      }
-      /* lookup (topic, opts, callback) { } */
+  topic (key) {
+    this.topics.get(key)
+  }
+
+  tick (iteration, delta) {
+    this.age += delta
+    // Fetch new peers
+    if (this.lookup && this.age - this.lastLookup > 1000) {
+      this.queryLookup()
     }
-    return sos(stub, 'discovery')
+
+    // Attempt to connect
+    if (this.lookup &&
+      this.peerQueue.length &&
+      this.peer.sockets.length < this.peer.maxConnections) {
+      const que = this.peerQueue
+      this.peerQueue = []
+      que.forEach(n => {
+        if (this.age - n.lastAttempt > 5000) {
+          n.lastAttempt = this.age
+          const { peer } = n
+          // Attempt to connect
+          this.peer.connect(peer, (err, socket) => {
+            if (err) return this.peerQueue.push(n)
+            // this.peer.signal(initiator ? 'connect' : 'accept', {
+            //   src: this.peer.id,
+            //   dst: peer.id,
+            //   sid: socket.id
+            // })
+          })
+        } else if (--n.attempts) {
+          this.peerQueue.push(n)
+        } else this.banned.push(n.peer.id)
+      })
+    }
   }
 
-  // writeprotect disco-sim
-  set discovery (v) { }
+  join (topic, { lookup, announce }) {
+    this.lookup = lookup
+    this.announce = announce
 
-  bind (port, callback) {
-    if (typeof port === 'function') return this.bind(null, port)
-    // Peer is connectable.
-    console.log(`======= Peer ${this.peer.id} is listening/connectable =====`)
-    this.simnet.listeningPeers[this.peer.id] = this.peer
-    callback(null)
+    if (!lookup && !announce) {
+      this.lookup = true
+      this.announce = true
+    }
+    if (this.lookup) this.queryLookup()
+    if (this.announce) this.doAnnounce(topic)
+  }
+
+  doAnnounce (topic) {
+    this.joinedTopics.push(topic)
+    this.dht.register(topic, this.peer)
+  }
+
+  queryLookup () {
+    for (const topic of this.joinedTopics) {
+      for (const cand of this.dht.getCandiates(topic)) {
+        if (this.banned.indexOf(cand.id) === -1) {
+          this.peerQueue.push({
+            lastAttempt: -20000,
+            attempts: 10,
+            peer: cand
+          })
+          this.emit('peer', cand)
+        }
+      }
+    }
   }
 }
 
-let sckCtr = 0
-class SimulatedSwarm {
+class SimDHT {
   constructor (signal) {
-    this.records = []
     this.listeningPeers = {}
     this.signal = signal
-    this._discoverLimit = 5
-    // this.addrSpace = { 43: Peer, 24: Peer }
   }
 
-  register (record) {
-    this.records.push(record)
+  register (topic, record) {
+    topic = topic.toString()
+    this.listeningPeers[topic] = this.listeningPeers[topic] || []
+    this.listeningPeers[topic].push(record)
   }
 
-  _unregister (record) {
-    const idx = this.records.indexOf(record)
-    if (idx !== -1) this.records.splice(idx, 1)
+  unregister (topic, record) {
+    const records = this.listeningPeers[topic]
+    const idx = records.indexOf(record)
+    if (idx !== -1) records.splice(idx, 1)
+  }
+
+  getCandiates (topic) {
+    return this.listeningPeers[topic]
+      .sort(() => Math.random() - 0.5) // shuffle
   }
 
   tick (iteration, deltaTime) {
-    for (const record of this.records) {
-      if (iteration <= record.lastTick + 1) continue
-      for (const tkey of Object.keys(record.topics)) {
-        const topic = record.topics[tkey]
-        if (!topic.lookup) continue
-
-        // Find candidates
-        this.records
-          .filter(r => r !== record &&
-            r.topics[tkey] &&
-            r.topics[tkey].announce &&
-            topic.candidates.indexOf(r.peer))
-          .sort(() => Math.random() - 0.5) // shuffle
-          .forEach((cr, i) => { // emit peer event
-            if (record.maxDiscover <= i) return
-            record.emit('peer', { record: cr, topic: Buffer.from(tkey), local: false })
-          })
-      }
-      record.lastTick = iteration
-    }
+    // TODO: auto remove stale
   }
 
   async close () {
@@ -272,7 +277,7 @@ class Simulator extends EventEmitter {
     this.poolPath = opts.poolPath || join(__dirname, '_cache')
     this._idCtr = 0
     this._logger = opts.logger || console.log
-    this._swarmNetwork = new SimulatedSwarm(this._signal.bind(this))
+    this._simdht = new SimDHT(this._signal.bind(this))
     this.time = 0
     this.iteration = 0
     this.sessionId = new Date().getTime()
@@ -308,7 +313,7 @@ class Simulator extends EventEmitter {
         const storage = f => raf(join(this.poolPath, String(id), f))
         // TODO: implement random-access-metered
         const peer = new SimulatedPeer(id, this._signal.bind(this), behaviour)
-        peer.bootstrap(storage, this._swarmNetwork, behaviour)
+        peer.bootstrap(storage, this._simdht, behaviour)
           .then(() => {
             this.peers.splice(this.peers.indexOf(peer), 1)
             if (!--this.pending) this._transition(FINISHED)
@@ -329,7 +334,7 @@ class Simulator extends EventEmitter {
     })
   }
 
-  run (speed = 0.1, interval = 500) {
+  run (speed = 0.9, interval = 500) {
     this._transition(RUNNING, { speed, interval })
     return defer(async done => {
       let timeLastRun = new Date().getTime()
@@ -348,7 +353,7 @@ class Simulator extends EventEmitter {
     const iteration = ++this.iteration
     this.time += deltaTime
 
-    this._swarmNetwork.tick(iteration, deltaTime) // if is hyperswarmSim
+    this._simdht.tick(iteration, deltaTime) // if is hyperswarmSim
 
     const summary = {
       delta: deltaTime,
@@ -373,15 +378,15 @@ class Simulator extends EventEmitter {
         const budget = Math.min(budgets[src.id], budgets[dst.id])
         // We're simplifying budgets for sockets, treating them
         // as if they're all half-duplex.
-        const { rx, tx } = socket.tick(iteration, budget)
+        const { rx, tx, end, noop } = socket.tick(iteration, budget)
+        if (!noop) summary.connections++
         const load = (rx + tx) / budget
-        this._signal('socket', 'tick', { id: socket.id, src: src.id, dst: dst.id, rx, tx, load })
+        this._signal('socket', 'tick', { id: socket.id, src: src.id, dst: dst.id, rx, tx, load, ended: end })
         budgets[src.id] -= rx + tx
         budgets[dst.id] -= rx + tx
         consumedBandwidth += rx + tx
         src._inccon(rx, tx)
         dst._inccon(rx, tx)
-        summary.connections++
       }
       peer.tick(iteration, deltaTime)
     }
@@ -398,8 +403,11 @@ class Simulator extends EventEmitter {
   }
 
   async teardown () {
-    await this._swarmNetwork.close()
+    await this._simdht.close()
     await this._purgeStorage()
+    for (const peer of this.peers) {
+      await peer.close()
+    }
   }
 }
 

@@ -6,7 +6,7 @@ const { randomBytes } = require('crypto')
 function noop () {}
 
 test('Discovery & Transmission', async t => {
-  t.plan(4)
+  t.plan(6)
   try {
     const sim = new HyperSim({
       logger: noop // line => console.error(JSON.stringify(line))
@@ -25,11 +25,14 @@ test('Discovery & Transmission', async t => {
           })
 
           swarm.once('connection', (socket, details) => {
+            t.pass('seed onConnection')
             socket.once('close', () => {
               // t.equal(detail.client, false, 'Initiating boolean available')
               if (!--pending) t.notOk(end(), 'Seed stream closed')
             })
-            socket.once('data', chunk => {
+
+            socket.on('data', chunk => {
+              debugger
               t.equal(chunk.toString(), 'hey seed', 'Leech msg received')
               socket.write('Yo leech!')
               // stream.end()
@@ -46,7 +49,9 @@ test('Discovery & Transmission', async t => {
             announce: true // optional- announce self as a connection target
           })
           swarm.once('connection', (socket, details) => {
+            t.pass('leech onConnection')
             socket.once('data', chunk => {
+              debugger
               t.equal(chunk.toString(), 'Yo leech!', 'Seed msg received')
               socket.destroy()
             })
@@ -59,7 +64,7 @@ test('Discovery & Transmission', async t => {
       }
     ])
 
-    await sim.run()
+    await sim.run(2, 100)
     t.end()
   } catch (err) { t.error(err) }
 })
