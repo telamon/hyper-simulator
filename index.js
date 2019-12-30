@@ -283,8 +283,11 @@ class Simulator extends EventEmitter {
     super()
     this.poolPath = opts.poolPath || join(__dirname, '_cache')
     this._idCtr = 0
-    this._logger = opts.logger || termAggregator() || (msg => console.log(JSON.stringify(msg)))
     this._simdht = new SimDHT(this._signal.bind(this))
+
+    // Default logging behaviour is to output ndjson to STDOUT
+    this._logger = opts.logger || (msg => console.log(JSON.stringify(msg)))
+
     this.time = 0
     this.iteration = 0
     this.sessionId = new Date().getTime()

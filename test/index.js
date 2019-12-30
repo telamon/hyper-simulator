@@ -12,63 +12,55 @@ test('Discovery & Transmission', async t => {
       logger: noop // line => console.error(JSON.stringify(line))
     })
 
-    await sim.setup([
-      {
-        name: 'seed',
-        count: 1,
-        initFn ({ swarm, signal, name }, end) {
-          let pending = 1
+    sim.launch(({ swarm, signal, name }, end) => {
+      let pending = 1
 
-          swarm.join(Buffer.from('stub-topic'), {
-            lookup: false, // find & connect to peers
-            announce: true // optional- announce self as a connection target
-          })
+      swarm.join(Buffer.from('stub-topic'), {
+        lookup: false, // find & connect to peers
+        announce: true // optional- announce self as a connection target
+      })
 
-          swarm.once('connection', (socket, details) => {
-            t.pass('seed onConnection: ' + socket.id)
-            socket.once('close', () => {
-              // t.equal(detail.client, false, 'Initiating boolean available')
-              if (!--pending) t.notOk(end(), 'Seed stream closed')
-            })
+      swarm.once('connection', (socket, details) => {
+        t.pass('seed onConnection: ' + socket.id)
+        socket.once('close', () => {
+          // t.equal(detail.client, false, 'Initiating boolean available')
+          if (!--pending) t.notOk(end(), 'Seed stream closed')
+        })
 
-            socket.on('data', chunk => {
-              t.equal(chunk.toString(), 'hey seed', 'Leech msg received')
-              socket.write('Yo leech!')
-              socket.end()
-            })
-          })
-        }
-      },
-      {
-        name: 'leech',
-        count: 1,
-        initFn ({ swarm, signal, name }, end) {
-          swarm.join(Buffer.from('stub-topic'), {
-            lookup: true, // find & connect to peers
-            announce: true // optional- announce self as a connection target
-          })
-          swarm.once('connection', (socket, details) => {
-            t.pass('leech onConnection ' + socket.id)
-            socket.once('data', chunk => {
-              t.equal(chunk.toString(), 'Yo leech!', 'Seed msg received')
-              socket.end()
-              // socket.destroy()
-            })
-            socket.once('close', () => {
-              t.notOk(end(), 'Leech stream closed')
-            })
-            socket.write('hey seed')
-          })
-        }
-      }
-    ])
+        socket.on('data', chunk => {
+          t.equal(chunk.toString(), 'hey seed', 'Leech msg received')
+          socket.write('Yo leech!')
+          socket.end()
+        })
+      })
+    })
+
+    sim.launch(({ swarm, signal, name }, end) => {
+      swarm.join(Buffer.from('stub-topic'), {
+        lookup: true, // find & connect to peers
+        announce: true // optional- announce self as a connection target
+      })
+      swarm.once('connection', (socket, details) => {
+        t.pass('leech onConnection ' + socket.id)
+        socket.once('data', chunk => {
+          t.equal(chunk.toString(), 'Yo leech!', 'Seed msg received')
+          socket.end()
+          // socket.destroy()
+        })
+        socket.once('close', () => {
+          t.notOk(end(), 'Leech stream closed')
+        })
+        socket.write('hey seed')
+      })
+    })
 
     await sim.run(2, 100)
     t.end()
   } catch (err) { t.error(err) }
 })
 
-test.only('Basic hypercore simulation', async t => {
+test('Basic hypercore simulation', async t => {
+  t.plan(5)
   try {
     const sim = new HyperSim({
       logger: noop
@@ -105,7 +97,7 @@ test.only('Basic hypercore simulation', async t => {
     )
 
     // Launch 3 leeches
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < 2; i++) {
       sim.launch('leech', ({ storage, swarm, signal }, end) => {
         const feed = hypercore(storage, seedFeed.key)
         feed.ready(() => {
@@ -127,7 +119,7 @@ test.only('Basic hypercore simulation', async t => {
     }
 
     // Run the simulation
-    await sim.run()
+    await sim.run(2, 100)
   } catch (err) { t.error(err) }
   t.end()
 })

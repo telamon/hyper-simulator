@@ -10,7 +10,7 @@ const nBlocks = 45
 
 try {
   const simulation = new HyperSim({
-    // logger: () => {},
+    logger: HyperSim.TermMachine()
   })
 
   simulation
