@@ -23,7 +23,7 @@ class SimulatedPeer {
     this.name = opts.name
     this.linkRate = opts.linkRate || 102400
     this.latency = opts.latency || 100
-    this.maxConnections = opts.maxConnections || 5
+    this.maxConnections = opts.maxConnections || 3
     this.sockets = []
     this.lastTick = 0
     this.age = 0
@@ -82,7 +82,8 @@ class SimulatedPeer {
       linkRate: this.linkRate,
       load: (rx + tx) / (this.linkRate * delta / 1000),
       state: this.finished ? 'done' : 'active',
-      age: this.age
+      age: this.age,
+      finished: this.finished
     })
   }
 
@@ -98,6 +99,8 @@ class SimulatedPeer {
   _end (error) {
     if (this.finished) return console.error('WARNING!: `end` invoked more than once by:', this.name, this.id)
     this.finished = true
+    // TODO: unregister peer from simulator.
+    // this.peers.splice(this.peers.indexOf(peer), 1)
     this._signal('end', { error })
   }
 
@@ -206,13 +209,10 @@ class BoundSwarm extends EventEmitter {
   }
 
   join (topic, { lookup, announce } = {}) {
-    this.lookup = lookup
-    this.announce = announce
+    this.lookup = !(lookup === false)
+    this.announce = !(announce === false)
 
-    if (!lookup && !announce) {
-      this.lookup = true
-      this.announce = true
-    }
+    if (!this.lookup && !this.announce) throw new Error('At both lookup and announce can\'t be set to false')
     if (this.lookup) this.queryLookup()
     if (this.announce) this.doAnnounce(topic)
   }
@@ -284,6 +284,8 @@ class Simulator extends EventEmitter {
     this.pending = 0
     this.run = this.run.bind(this)
     this.peers = []
+    this._finishNextTick = false
+    this.bwReserve = 10 << 8 // Minimum bandwidth for socket per tick 10KiloByte
     this._transition(INIT, {
       swarm: 'hypersim'
     })
@@ -315,8 +317,7 @@ class Simulator extends EventEmitter {
         const peer = new SimulatedPeer(id, this._signal.bind(this), behaviour)
         peer.bootstrap(storage, this._simdht, behaviour)
           .then(() => {
-            this.peers.splice(this.peers.indexOf(peer), 1)
-            if (!--this.pending) this._transition(FINISHED)
+            if (!--this.pending) this._finishNextTick = true
           })
         this.peers.push(peer)
       }
@@ -350,6 +351,7 @@ class Simulator extends EventEmitter {
   }
 
   _tick (deltaTime) {
+    if (this._finishNextTick) this._transition(FINISHED)
     const iteration = ++this.iteration
     this.time += deltaTime
 
@@ -367,23 +369,25 @@ class Simulator extends EventEmitter {
     const budgets = {}
 
     const swarmBandwidthCapacity = this.peers.reduce((sum, p) => {
-      budgets[p.id] = p.linkRate * deltaTime / 1000
+      const h = p.sockets.length * this.bwReserve
+      budgets[p.id] = (p.linkRate - h) * deltaTime / 1000
       return sum + budgets[p.id]
     }, 0)
 
     // Pump the simulated sockets
     for (const peer of this.peers) {
-      for (const socket of peer.sockets) {
+      // Yep, we havea QoS issue, reserving bandwith is one way but
+      // but each tick we exhaust the bandwith on the first socket..
+      for (const socket of peer.sockets.sort(() => Math.random() - 0.5)) {
         const { src, dst } = socket
         if (socket.lastTick >= iteration) continue
-        const budget = Math.min(budgets[src.id], budgets[dst.id])
+        const budget = Math.max(this.bwReserve * deltaTime / 1000, Math.min(budgets[src.id], budgets[dst.id]))
         // We're simplifying budgets for sockets, treating them
         // as if they're all half-duplex.
         const stat = socket.tick(iteration, budget)
         const { rx, tx, noop, rxEnd, txEnd, destroyed } = stat
         if (rxEnd || destroyed) src._removeSocket(socket)
         if (txEnd || destroyed) dst._removeSocket(socket)
-
         if (!noop) summary.connections++
         const load = (rx + tx) / budget
 
@@ -399,7 +403,7 @@ class Simulator extends EventEmitter {
         budgets[dst.id] -= rx + tx
         consumedBandwidth += rx + tx
         src._inccon(rx, tx)
-        dst._inccon(rx, tx)
+        dst._inccon(tx, rx)
       }
       peer.tick(iteration, deltaTime)
     }
@@ -418,9 +422,10 @@ class Simulator extends EventEmitter {
   async teardown () {
     await this._simdht.close()
     await this._purgeStorage()
+    /*
     for (const peer of this.peers) {
       await peer.close()
-    }
+    } */
   }
 }
 
