@@ -15,7 +15,7 @@ try {
 
   simulation
     .setup([
-      // Launch 1 seed with a link cap to 56KBit
+      // Launch 1 seed with a link cap to 56KByte
       { name: 'seed', initFn: SimulatedPeer, count: 1, linkRate: 56 << 10 },
       { name: 'leech', initFn: SimulatedPeer, count: nLeeches, linkRate: 1024 << 8 }
     ])
