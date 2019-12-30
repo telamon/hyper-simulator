@@ -1,7 +1,7 @@
 const test = require('tape')
 const hypercore = require('hypercore')
 const HyperSim = require('..')
-const { randomBytes } = require('crypto')
+const { defer } = require('deferinfer')
 
 function noop () {}
 
@@ -68,7 +68,67 @@ test('Discovery & Transmission', async t => {
   } catch (err) { t.error(err) }
 })
 
-test('Basic hypercore simulation', t => {
+test.only('Basic hypercore simulation', async t => {
+  try {
+    const sim = new HyperSim({
+      logger: noop
+      // logger: HyperSim.TermMachine()
+      // logger: line => console.error(line)
+    })
+
+    await sim.ready()
+
+    const initSeedFn = ({ storage, swarm }, end) => {
+      return defer(done => {
+        const feed = hypercore(storage)
+        feed.ready(() => {
+          feed.append('hello world!', err => {
+            t.error(err)
+            swarm.join(feed.key, { lookup: false })
+            swarm.on('connection', (socket, { client }) => {
+              socket
+                .pipe(feed.replicate(client, { live: true }))
+                .pipe(socket)
+                .on('error', t.error)
+            })
+            end()
+            done(null, feed)
+          })
+        })
+      })
+    }
+
+    // Launch 1 nerfed seed
+    const seedFeed = await sim.launch('seed',
+      { linkSpeed: 50 * 1024, maxConnections: 1 },
+      initSeedFn
+    )
+
+    // Launch 3 leeches
+    for (let i = 0; i < 3; i++) {
+      sim.launch('leech', ({ storage, swarm, signal }, end) => {
+        const feed = hypercore(storage, seedFeed.key)
+        feed.ready(() => {
+          swarm.join(feed.key)
+          swarm.on('connection', (socket, { client }) => {
+            socket
+              .pipe(feed.replicate(client, { live: true }))
+              .pipe(socket)
+              .on('error', t.error)
+          })
+          feed.get(0, (err, chunk) => {
+            t.error(err)
+            signal('msg-replicated')
+            t.equal(chunk.toString('utf8'), 'hello world!', `Leech${i} done`)
+            end()
+          })
+        })
+      })
+    }
+
+    // Run the simulation
+    await sim.run()
+  } catch (err) { t.error(err) }
   t.end()
 })
 

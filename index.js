@@ -1,16 +1,18 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 const raf = require('random-access-file')
-const { defer } = require('deferinfer')
+const { defer, infer } = require('deferinfer')
 const { mkdirSync, statSync } = require('fs')
 const { join } = require('path')
 const rimraf = require('rimraf')
 const { EventEmitter } = require('events')
 const BufferedThrottleStream = require('./lib/throttled-stream')
 const termAggregator = require('./lib/term-aggregator')
-const sos = require('save-our-sanity')
 const hyperswarm = require('hyperswarm')
 
-const INIT = 'init'
+// const sos = require('save-our-sanity')
+
+const INIT = 'initializing'
+const READY = 'ready'
 const RUNNING = 'running'
 const FINISHED = 'finished'
 
@@ -22,7 +24,7 @@ class SimulatedPeer {
     this.id = id
     this.name = opts.name
     this.linkRate = opts.linkRate || 102400
-    this.latency = opts.latency || 100
+    // this.latency = opts.latency || 100 // Not used yet
     this.maxConnections = opts.maxConnections || 3
     this.sockets = []
     this.lastTick = 0
@@ -120,33 +122,38 @@ class SimulatedPeer {
     return true
   }
 
-  bootstrap (storage, simdht, behaviour) {
+  _bootstrap (storage, simdht, initFn, opts) {
     this.storage = storage
-    this.behaviour = behaviour
+
     if (simdht) {
       this.simdht = simdht
       this.boundSwarm = new BoundSwarm(simdht, this)
     } else {
-      // Does this even work?
-      this.boundSwarm = hyperswarm() // this._swarm.boundInterface(peer), // TODO: alternatively support a real instance of hyperswarm
+      // TODO: alternatively support a real instance of hyperswarm
+      this.boundSwarm = hyperswarm()
     }
 
-    return defer(async done => {
-      behaviour.initFn({
-        ...behaviour,
-        id: this.id,
-        name: behaviour.name,
-        storage,
-        swarm: this.boundSwarm,
-        signal: (ev, args) => {
-          this._rootSignal('custom', ev, { ...args, name: behaviour.name, id: this.id })
-        }
-      }, err => {
-        this._end(err || null)
-        // this._swarm._destoyConnectionsOf(id)
-        done()
-      })
+    const context = {
+      opts,
+      id: this.id,
+      name: this.name,
+      storage,
+      swarm: this.boundSwarm,
+      signal: (ev, args = {}) => {
+        this._rootSignal('custom', ev, { ...args, name: this.name, id: this.id })
+      }
+    }
+
+    let peerDone = null
+    const prom = defer(done => { peerDone = done })
+
+    const pass = initFn(context, err => {
+      this._end(err || null)
+      // this._swarm._destoyConnectionsOf(id)
+      peerDone()
     })
+
+    return { pass, prom }
   }
 }
 
@@ -281,10 +288,10 @@ class Simulator extends EventEmitter {
     this.time = 0
     this.iteration = 0
     this.sessionId = new Date().getTime()
-    this.pending = 0
+    this.pendingPeers = 0
+    this.finishedPeers = 0
     this.run = this.run.bind(this)
     this.peers = []
-    this._finishNextTick = false
     this.bwReserve = 10 << 8 // Minimum bandwidth for socket per tick 10KiloByte
     this._transition(INIT, {
       swarm: 'hypersim'
@@ -296,32 +303,45 @@ class Simulator extends EventEmitter {
     this._state = newState
   }
 
-  async setup (scenario) {
-    await this._purgeStorage()
-    try {
-      const stat = statSync(this.poolPath)
-      if (!stat.isDirectory()) throw new Error(`Path already exists and is not a directory: ${this.poolPath}`)
-      this._signal('simulator', 'using-cache', { path: this.poolPath })
-    } catch (err) {
-      if (err.code !== 'ENOENT') throw err
-      mkdirSync(this.poolPath)
-      this._signal('simulator', 'create-cache', { path: this.poolPath })
-    }
+  ready (cb) {
+    if (!this._readyResult) {
+      this._readyResult = defer(async done => {
+        // Purge any left overs
+        await this._purgeStorage()
 
-    for (const behaviour of scenario) {
-      for (let n = 0; n < behaviour.count; n++) {
-        this.pending++
-        const id = ++this._idCtr
-        const storage = f => raf(join(this.poolPath, String(id), f))
-        // TODO: implement random-access-metered
-        const peer = new SimulatedPeer(id, this._signal.bind(this), behaviour)
-        peer.bootstrap(storage, this._simdht, behaviour)
-          .then(() => {
-            if (!--this.pending) this._finishNextTick = true
-          })
-        this.peers.push(peer)
-      }
+        // Initialize new fold structure
+        try {
+          const stat = statSync(this.poolPath)
+          if (!stat.isDirectory()) throw new Error(`Path already exists and is not a directory: ${this.poolPath}`)
+          this._signal('simulator', 'using-cache', { path: this.poolPath })
+        } catch (err) {
+          if (err.code !== 'ENOENT') throw err
+          mkdirSync(this.poolPath)
+          this._signal('simulator', 'create-cache', { path: this.poolPath })
+        }
+        this._transition(READY, {})
+        done(null)
+      })
     }
+    return infer(this._readyResult, cb)
+  }
+
+  launch (name = 'anon', opts = {}, initFn) {
+    if (typeof name !== 'string') return this.launch(undefined, name, opts)
+    if (typeof opts === 'function') return this.launch(name, undefined, opts)
+    if (typeof initFn !== 'function') throw new Error('Missing parameter initFn, must be a function')
+    opts.name = name
+    const id = ++this._idCtr
+    const storage = f => raf(join(this.poolPath, String(id), f))
+    // TODO: implement random-access-metered
+    const peer = new SimulatedPeer(id, this._signal.bind(this), opts)
+
+    this.pendingPeers++
+    this.peers.push(peer)
+    const { pass, prom } = peer._bootstrap(storage, this._simdht, initFn, opts)
+    prom.then(() => this.finishedPeers++)
+
+    return pass
   }
 
   _signal (type, ev, payload = {}) {
@@ -335,7 +355,7 @@ class Simulator extends EventEmitter {
     })
   }
 
-  run (speed = 0.9, interval = 500) {
+  run (speed = 0.1, interval = 200) {
     this._transition(RUNNING, { speed, interval })
     return defer(async done => {
       let timeLastRun = new Date().getTime()
@@ -351,7 +371,7 @@ class Simulator extends EventEmitter {
   }
 
   _tick (deltaTime) {
-    if (this._finishNextTick) this._transition(FINISHED)
+    if (this.pendingPeers && this.pendingPeers - this.finishedPeers < 1) this._transition(FINISHED)
     const iteration = ++this.iteration
     this.time += deltaTime
 
@@ -360,7 +380,7 @@ class Simulator extends EventEmitter {
     const summary = {
       state: this._state,
       delta: deltaTime,
-      pending: this.pending,
+      pending: this.pendingPeers - this.finishedPeers,
       connections: 0,
       peers: this.peers.length
     }
@@ -431,3 +451,4 @@ class Simulator extends EventEmitter {
 
 module.exports = Simulator
 module.exports.BufferedThrottleStream = BufferedThrottleStream
+module.exports.TermMachine = termAggregator
