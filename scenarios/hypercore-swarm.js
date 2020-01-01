@@ -9,25 +9,43 @@ const nLeeches = 20
 const nBlocks = 45
 
 try {
-  const simulation = new HyperSim({
+  const simulator = new HyperSim({
     logger: HyperSim.TermMachine()
+    // logger: () => {}
   })
 
-  simulation
-    .setup([
-      // Launch 1 seed with a link cap to 56KByte
-      { name: 'seed', initFn: SimulatedPeer, count: 1, linkRate: 56 << 10 },
-      { name: 'leech', initFn: SimulatedPeer, count: nLeeches, linkRate: 1024 << 8 }
-    ])
-    .then(() => simulation.run(2, 100))
-    .then(() => console.log('Simulation finished'))
-    .catch(err => console.log('Simulation failed', err))
+  simulator.ready(() => {
+    // Launch one seed.
+    simulator.launch('seed', {
+      linkRate: 56 << 10
+    }, SimulatedPeer)
+
+    // Launch some leeches
+    for (let i = 0; i < nLeeches; i++) {
+      const linkRate = (() => {
+        switch (i % 3) {
+          case 0: return 2048 << 8
+          case 1: return 1024 << 8
+          case 2: return 512 << 8
+        }
+      })()
+      simulator.launch('leech', {
+        linkRate
+      }, SimulatedPeer)
+    }
+
+    // Watch the data be replicated.
+    simulator.run(3, 100)
+      .then(() => console.error('Simulation finished'))
+      .catch(err => console.error('Simulation failed', err))
+  })
 } catch (e) {
-  console.log('Simulation failed', e)
+  console.error('Simulation failed', e)
 }
 
-function SimulatedPeer (opts, end) {
-  const { storage, swarm, signal, name } = opts
+function SimulatedPeer (context, end) {
+  const { storage, swarm, signal, name, ontick } = context
+
   const feed = hypercore(storage, publicKey, {
     // Let only the seed have the secretKey
     secretKey: name === 'seed' ? secretKey : null
@@ -50,7 +68,7 @@ function SimulatedPeer (opts, end) {
   feed.ready(() => {
     if (name !== 'seed') {
       feed.on('download', (seq, chunk, peer) => {
-        signal('ondownload', { seq: feed.length })
+        signal('download', { seq })
         // Ending conditions for a leech is to have all blocks
         if (feed.downloaded() === nBlocks) {
           end()
@@ -71,5 +89,9 @@ function SimulatedPeer (opts, end) {
       }
       appendRandom()
     }
+    /*
+    ontick(v => {
+      return { downloaded: feed.downloaded() }
+    })*/
   })
 }

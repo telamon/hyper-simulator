@@ -11,6 +11,7 @@ test('Discovery & Transmission', async t => {
     const sim = new HyperSim({
       logger: noop // line => console.error(JSON.stringify(line))
     })
+    await sim.ready()
 
     sim.launch(({ swarm, signal, name }, end) => {
       let pending = 1
