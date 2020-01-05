@@ -1,0 +1,73 @@
+#!/usr/bin/env node
+const parseArgs = require('minimist')
+const { defer } = require('deferinfer')
+const Simulator = require('../')
+const { TermMachine } = Simulator
+const { createWriteStream } = require('fs')
+const requireInject = require('require-inject')
+const { resolve } = require('path')
+
+// const chalk = require('chalk')
+// const { askSingle, confirm } = require('reloquent')
+// const { type, arch, hostname } = require('os')
+
+const usage = `
+usage: hypersim [OPTIONS] [PATH TO SCENARIO]
+
+\t-o/--output path
+\tRedirect simulator-log output to file. (Default: stdout)
+
+\t -T
+\tTee output into Te®mMachine202x. Discards the main simlog
+\twhen -o is not set.
+
+example:
+\t$ hypersim -T -o swarm-log.json scenarios/my-scenario.js
+`
+
+const log = console.error
+
+defer(async done => {
+  const argv = parseArgs(process.argv.slice(2))
+
+  const scenarioPath = resolve(process.cwd(), argv._.shift())
+
+  if (!scenarioPath || argv.h || argv.help) {
+    log(usage)
+    process.exit(1)
+  }
+
+  const outputFile = process.env.HYPERSIM_OUT || argv.o || argv.output
+
+  let logger = null
+  if (outputFile) {
+    const logFileStream = createWriteStream(outputFile)
+    logger = line => logFileStream.write(line)
+  }
+
+  if (process.env.HYPERSIM_TEE || argv.T) {
+    const l1 = logger || (() => {})
+    const l2 = TermMachine()
+    logger = line => {
+      l1(line)
+      l2(line)
+    }
+  }
+
+  const sim = new Simulator({ logger })
+
+  try {
+    const scenario = require(scenarioPath)
+    debugger
+  } catch (error) {
+    debugger
+    done(error)
+  }
+
+  // Fallback to printing help
+  // when no instructions match
+  log(usage)
+  done(null, 1)
+})
+  .then(code => process.exit(code || 0))
+  .catch(err => { log(err); process.exit(1) })
