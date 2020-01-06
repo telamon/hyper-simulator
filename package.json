@@ -21,7 +21,6 @@
     "hypersim-parser": "^0.0.4",
     "hyperswarm": "^2.4.0",
     "random-access-file": "^2.1.3",
-    "require-inject": "^1.4.4",
     "rimraf": "^3.0.0",
     "streamx": "^2.5.0"
   },
