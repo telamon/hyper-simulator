@@ -15,7 +15,7 @@ a couple of related projects:
 - [hypersim-parser](https://github.com/decentstack/hypersim-parser) Fast and memory efficient ndjson aggregator.
 - [hypersim-visualizer](https://github.com/decentstack/hypersim-visualizer) fancy Vue+D3.js visualizer.
 
-[![asciicast](https://asciinema.org/a/292026.svg)](https://asciinema.org/a/292026)
+[![asciicast](https://asciinema.org/a/292041.svg)](https://asciinema.org/a/292041)
 
 TODO:
 
@@ -146,6 +146,7 @@ function SpawnPeer(context, peerDone) {
 }
 
 ```
+
 
 ## <a name="contribute"></a> Contributing
 
