@@ -5,6 +5,16 @@
 
 > Simulate a swarm of peers running hyperswarm compatible applications
 
+The simulation generates a detailed "swarm-log" in `ndjson` format that can be used to analyze your applications
+behaviour over time.
+
+The screencast below demonstrates the built-in terminal-aggregator view that
+shows the simulator's status in real-time! Further offline analysis can be done anyway you want, heres
+a couple of related projects:
+
+- [hypersim-parser](https://github.com/decentstack/hypersim-parser) Fast and memory efficient ndjson aggregator.
+- [hypersim-visualizer](https://github.com/decentstack/hypersim-visualizer) fancy Vue+D3.js visualizer.
+
 [![asciicast](https://asciinema.org/a/292026.svg)](https://asciinema.org/a/292026)
 
 TODO:
