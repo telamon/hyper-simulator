@@ -28,39 +28,28 @@ example:
 const log = console.error
 
 defer(async done => {
-  const argv = parseArgs(process.argv.slice(2))
+  const argv = parseArgs(process.argv.slice(2), {
+    boolean: ['T'],
+    string: ['o'],
+    alias: {
+      o: 'output',
+      h: 'help'
+    }
+  })
 
   const scenarioPath = resolve(process.cwd(), argv._.shift())
-
-  if (!scenarioPath || argv.h || argv.help) {
+  if (!scenarioPath || argv.h) {
     log(usage)
-    process.exit(1)
+    return process.exit(1)
   }
-
-  const outputFile = process.env.HYPERSIM_OUT || argv.o || argv.output
-
-  let logger = null
-  if (outputFile) {
-    const logFileStream = createWriteStream(outputFile)
-    logger = line => logFileStream.write(line)
-  }
-
-  if (process.env.HYPERSIM_TEE || argv.T) {
-    const l1 = logger || (() => {})
-    const l2 = TermMachine()
-    logger = line => {
-      l1(line)
-      l2(line)
-    }
-  }
-
-  const sim = new Simulator({ logger })
+  process.env.HYPERSIM_OUT = argv.o
+  process.env.HYPERSIM_TEE = !!argv.T
 
   try {
-    const scenario = require(scenarioPath)
-    debugger
+    require(scenarioPath)
+    // TODO: catch the exit signal and call done
+    return
   } catch (error) {
-    debugger
     done(error)
   }
 

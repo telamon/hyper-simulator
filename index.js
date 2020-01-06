@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 const raf = require('random-access-file')
 const { defer, infer } = require('deferinfer')
-const { mkdirSync, statSync } = require('fs')
+const { mkdirSync, statSync, createWriteStream } = require('fs')
 const { join } = require('path')
 const rimraf = require('rimraf')
 const { EventEmitter } = require('events')
@@ -74,9 +74,7 @@ class SimulatedPeer {
 
     // tick BoundSwarm
     if (this.hasSimSwarm) this.boundSwarm.tick(iteration, delta)
-
-    // log Peer summary
-    this._signal('tick', {
+    const summary = {
       rx,
       tx,
       maxConnections: this.maxConnections,
@@ -86,7 +84,15 @@ class SimulatedPeer {
       state: this.finished ? 'done' : 'active',
       age: this.age,
       finished: this.finished
-    })
+    }
+
+    // Call handler and merge it's output into summary
+    if (typeof this._onTickHandler === 'function') {
+      const output = this._onTickHandler(summary)
+      if (typeof output === 'object' && output !== null) Object.assign(summary, output)
+    }
+    // log Peer summary
+    this._signal('tick', summary)
   }
 
   get isPoolFull () {
@@ -122,7 +128,7 @@ class SimulatedPeer {
     return true
   }
 
-  _bootstrap (storage, simdht, initFn, opts) {
+  _bootstrap (simulator, storage, simdht, initFn, opts) {
     this.storage = storage
 
     if (simdht) {
@@ -139,9 +145,11 @@ class SimulatedPeer {
       name: this.name,
       storage,
       swarm: this.boundSwarm,
+      simulator,
       signal: (ev, args = {}) => {
         this._rootSignal('custom', ev, { ...args, name: this.name, id: this.id })
-      }
+      },
+      ontick: handler => { this._onTickHandler = handler }
     }
 
     let peerDone = null
@@ -281,6 +289,7 @@ class SimDHT {
 class Simulator extends EventEmitter {
   constructor (opts = {}) {
     super()
+    Object.assign(opts, env2opts())
     this.poolPath = opts.poolPath || join(__dirname, '_cache')
     this._idCtr = 0
     this._simdht = new SimDHT(this._signal.bind(this))
@@ -341,7 +350,7 @@ class Simulator extends EventEmitter {
 
     this.pendingPeers++
     this.peers.push(peer)
-    const { pass, prom } = peer._bootstrap(storage, this._simdht, initFn, opts)
+    const { pass, prom } = peer._bootstrap(this, storage, this._simdht, initFn, opts)
     prom.then(() => this.finishedPeers++)
 
     return pass
@@ -434,8 +443,8 @@ class Simulator extends EventEmitter {
     summary.rate = deltaTime ? Math.ceil(consumedBandwidth / (deltaTime / 1000)) : -1
     if (swarmBandwidthCapacity > 0) summary.load = summary.rate / swarmBandwidthCapacity
     // TODO: add memory consumption to metrics
-    this._signal('simulator', 'tick', summary)
     this.emit('tick', iteration, summary)
+    this._signal('simulator', 'tick', summary)
   }
 
   _purgeStorage () {
@@ -450,6 +459,28 @@ class Simulator extends EventEmitter {
       await peer.close()
     } */
   }
+}
+
+function env2opts () {
+  const opts = {}
+  let logger = null
+
+  if (process.env.HYPERSIM_OUT) {
+    const outputFile = process.env.HYPERSIM_OUT
+    const logFileStream = createWriteStream(outputFile)
+    logger = line => logFileStream.write(JSON.stringify(line))
+  }
+
+  if (process.env.HYPERSIM_TEE) {
+    const l1 = logger || (() => {})
+    const l2 = termAggregator()
+    logger = line => {
+      l1(line)
+      l2(line)
+    }
+  }
+  if (logger) opts.logger = logger
+  return opts
 }
 
 module.exports = Simulator

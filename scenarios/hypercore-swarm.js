@@ -5,8 +5,8 @@ const { keyPair } = require('hypercore-crypto')
 
 const { publicKey, secretKey } = keyPair()
 
-const nLeeches = 20
-const nBlocks = 45
+const nLeeches = 8
+const nBlocks = 40
 
 try {
   const simulator = new HyperSim({
@@ -35,7 +35,7 @@ try {
     }
 
     // Watch the data be replicated.
-    simulator.run(3, 100)
+    simulator.run(3, 50)
       .then(() => console.error('Simulation finished'))
       .catch(err => console.error('Simulation failed', err))
   })
@@ -74,8 +74,6 @@ function SimulatedPeer (context, end) {
           end()
         }
       })
-      feed.on('append', () => {
-      })
       setupSwarm()
     } else {
       let pendingInserts = nBlocks
@@ -89,9 +87,9 @@ function SimulatedPeer (context, end) {
       }
       appendRandom()
     }
-    /*
+
     ontick(v => {
       return { downloaded: feed.downloaded() }
-    })*/
+    })
   })
 }

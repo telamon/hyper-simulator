@@ -5,86 +5,136 @@
 
 > Simulate a swarm of peers running hyperswarm compatible applications
 
-**MORE DOCS COMING SOON**
+[![asciicast](https://asciinema.org/a/292026.svg)](https://asciinema.org/a/292026)
 
 TODO:
 
-- [ ] Refactor behaviour registration interface
-- [ ] Use real hyperswarm with simulated network stack
-- [ ] Use real hyperswarm with simulated dht
-- [ ] Create executable `hypersim` script
-- [ ] Let executable output minimal aggregation during runtime.
-- [ ] Publish `hypersim-parser`
-- [ ] Publish `hypersim-visualizer`
+- [x] Refactor behaviour registration interface
+- [x] Let executable output minimal aggregation during runtime.
+- [x] Release `hypersim-parser`
+- [x] Provide hyperswarm interface
+- [ ] Release `hypersim-visualizer`
+- [ ] Support real hyperswarm with simulated network stack?
 
 ## <a name="install"></a> Install
 
-```
-npm install hyper-simulator
+```bash
+# with npm
+npm i --save-dev hyper-simulator
+
+# or with yarn
+yarn add -D hyper-simulator
+
 ```
 
 ## <a name="usage"></a> Usage
 
-Define at least one behaviour for your peers.
-The interface provides you with an instance of `random-access` and
-an instance of `hyperswarm`
-
-```js
-function SimulatedPeer ({ storage, swarm, signal }, end) {
-  const feed = hypercore(storage)
-
-  feed.ready(() => {
-    // Setup swarm
-    swarm.join(feed.key, { lookup: true, announce: true })
-
-    swarm.on('connection', (socket, { client }) => {
-      // Initiate Replication
-      socket
-        .pipe(feed.replicate(client))
-        .pipe(socket)
-    })
-  })
-
-  // Append your custom 'version' metric to swarm-log that
-  // can be used to visualize the distribution of data.
-  feed.on('download', seq => {
-    signal('version', { seq })
-
-    // The entire simulation can optionally be ended when
-    // all peer-instances have fullfilled their objectives.
-    if (seq > 5) end()
-  })
-})
-```
-
-```js
-// myapp-scenario.js
-const Simulator = require('hyper-simulator')
-
-const sim = new Simulator({
-  logger: line => console.error(JSON.stringify(line))
-})
-
-sim.on('tick', (iteration, summary) => {
-  // launch more peers or something..
-})
-
-sim
-  .setup([
-    // Launch 20 peers behaving as leeches
-    { name: 'leech', initFn: SimulatedPeer, count: 20 }
-
-    // Launch 1 peer behaving as a seed
-    { name: 'seed', initFn: SimulatedSeed, count: 1, maxConnections: 2 }
-  ])
-  // Run simulation 1x speed and 200ms delay between ticks
-  .then(() => simulation.run(1, 200))
-  .then(() => console.error('Simulation finished'))
-  .catch(err => console.error('Simulation failed', err)
-```
+Running from commandline:
 
 ```bash
-$ node myapp-scenario.js
+$(npm bin)/hypersim -T scenarios/myapp-scenario.js
+```
+
+### Defining a Scenario
+
+Example scenario:
+```js
+const Simulator = require('hyper-simulator')
+
+const sim = new Simulator()
+
+await sim.ready() // Give the simulator some time to initialize
+
+function MySeedSpawner() {
+  // See peer-factory docs below.
+}
+
+function MyLeechSpawner() {
+  // See peer-factory docs below.
+}
+
+// Launch 1 slow seed
+sim.launch('seed',{ linkRate: 56<<8 }, MySeedSpawner())
+
+// Launch 10 peers
+for (let i = 0; i < 10; i++) {
+  sim.launch('peer', MyLeechSpawner())
+}
+
+// Run simulation 1x speed and 200ms delay between ticks.
+sim.run(1, 200)
+  .then(() => console.error('Simulation finished'))
+  .catch(err => console.error('Simulation failed', err)
+
+// Simulator will run until manually stopped or all peers have signaled that they're done.
+```
+
+### Peer factory function
+
+The launch interface is defined as followed:
+
+#### `simulator.launch([name], [opts], initFn)`
+
+- _optional_ **name** `String` tag the peer with a name or descriptor.
+- _optional_ **opts** `Object` Launch options se below for defaults
+- **intFn** `function(simContext, peerDone)` Peer factory function, see below
+- **return** the result of `initFn` invocation.
+
+Example opts:
+```js
+{
+  name: 'anon',       // Tag peer with a name.
+  linkRate: 102400,   // Maximum bandwidth in Bytes/Second
+  maxConnections: 3,  // Maximum amount of active connections to maintain.
+}
+```
+
+Example peer factory function:
+```js
+function SpawnPeer(context, peerDone) {
+  // Destructure all values in context
+  const {
+    id,      // Uniquely generated id
+    name,    // Name of peer as specified by launch()
+    storage, // An instance of random-access-file,
+    swarm,   // An instance of simulated hyperswarm
+    opts,    // Copy of opts given to launch()
+    signal,  // Function signal(eventName, payload) (more on this below)
+    ontick,  // Lets you register a handler for peer.tick event: ontick(myHandlerFun)
+    simulator // reference to the simulator.
+  } = context
+
+  // Initialize a decentralized feed or your application.
+  const feed = hypercore(storage)
+
+  // Find peers to replicate with
+  feed.onReady(() => {
+    // Handle remote connections
+    swarm.on('connection', (socket, { client }) => {
+      socket
+        .pipe(feed.replicate(client, { live: true }))
+        .pipe(socket)
+    })
+
+    // Join the topic
+    swarm.join(feed.key)
+  })
+
+  // Add custom signaling to the simulator output
+  feed.on('download', seq => {
+    signal('download', { seq })
+  })
+
+  // Attach peer.tick handler
+  ontick(summary => {
+    // Signal done when this peer has more than 5 blocks downloaded.
+    if (feed.downloaded() > 5) peerDone()
+
+    // Decorate the simulator peer#tick output with extra keys/values
+    return { downloadedBlocks: feed.downloaded() }
+  })
+}
+
 ```
 
 ## <a name="contribute"></a> Contributing
