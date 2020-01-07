@@ -100,6 +100,7 @@ Example opts:
 ```
 
 Example peer factory function:
+
 ```js
 function SpawnPeer(context, peerDone) {
   // Destructure all values in context
@@ -147,6 +148,133 @@ function SpawnPeer(context, peerDone) {
 
 ```
 
+## Swarm-log
+
+The following built-in events that are logged,
+
+**Global keys**
+
+All events will contain the following keys:
+
+- **iteration** `{Number}` number of simulator ticks since start.
+- **sessionId** `{Number}` Time/date at simulator initialization.
+- **type** `{String}` Type of event
+- **event** `{String}` Name of event
+- **time** `{Number}` Amount of virtual milliseconds since simulator start.
+
+#### simulator `state-initializing`
+
+Emitted when simulator is instantiated
+
+- **type** `simulator`
+- **event** `state-initializing`
+- **swarm** `hypersim|hyperswarm`
+
+
+#### simulator `state-ready`
+
+Emitted when simulator becomes ready
+
+- **type** `simulator`
+- **event** `state-ready`
+- **swarm** `hypersim|hyperswarm`
+
+#### simulator `state-running`
+Emitted when simulator is started.
+- **type** `simulator`
+- **event** `state-running`
+- **speed** `{number}` desc
+- **interval** `{number}` desc
+
+#### simulator `tick`
+
+Emitted once on each tick
+
+- **type** `simulator`
+- **event** `tick`
+- **state** `{string}` current state
+- **delta** `{number}` virtual amount of milliseconds since previous tick.
+- **pending** `{number}` Amount of non-finished peers in simulation.
+- **connections** `{number}` Total amount of connections in swarm.
+- **peers** `{number}` Amount of peers in swarm
+- **capacity** `{number}` Sum of all peers' bandwidth
+- **rate** `{number}` Sum of all peers' reported rate
+- **load** `{number}` rate / capacity
+
+#### simulator `state-finished`
+
+Emitted once when all active peers have reached the 'done' or exited with an error.
+
+- **type** `simulator`
+- **event** `state-finished`
+
+
+#### peer `init`
+
+Emitted when a peer is launched
+
+- **type** `peer`
+- **event** `init`
+- **id** `{number}` unique id of the peer.
+- **name** `{string}` Peer name as provided during launch
+
+
+#### peer `end`
+
+Emitted when a peer has signaled being done or has thrown
+an uncaught error.
+
+- **type** `peer`
+- **event** `end`
+- **id** `{number}` unique id of the peer.
+- **name** `{string}` Peer name as provided during launch
+- **error** `{object}` null or the error that caused the peer to exit.
+
+#### peer `tick`
+
+Emitted by each peer every simulator tick.
+
+- **type** `peer`
+- **event** `tick`
+- **id** `{number}` Unique peer id.
+- **name** `{string}` Peer name
+- **rx** `{number}` Number of bytes received during tick
+- **tx** `{number}` Number of bytes transfered during tick
+- **maxConnections** `{number}` Connection limit.
+- **connectionCount** `{number}` Current connection count.
+- **linkRate** `{number}` Bandwidth limit of peer.
+- **load** `{number}` Bandwidth used during tick.
+- **state** `{string}` State of peer. `active` or `done`
+- **age** `{number}` Amount of ticks lived
+- **finished** `{boolean}` true when peer signaled being done/ended.
+
+#### socket `tick`
+
+Emitted on each tick for each active connection in simulation.
+
+- **type** `socket`
+- **event** `tick`
+- **rx** `{number}` Number of bytes received during tick
+- **tx** `{number}` Number of bytes transfered during tick
+- **noop** `{boolean}` true if no traffic occured during this tick
+- **rxEnd** `{boolean}` receving end of socket is closed
+- **txEnd** `{boolean}` transmitting end of socket is closed
+- **rxDrained** `{boolean}` Receiving buffer not empty
+- **txDrained** `{boolean}` Transmitting buffer not empty
+- **id** `{string}` Unique id of socket
+- **src** `{number}` Source peer id
+- **dst** `{number}` Destination peer id
+- **load** `{number}` (rx + tx) / Math.min(srcPeer.linkRate, dstPeer.linkRate)
+
+#### custom
+
+Emitted using the `signal` method provided by the peer launch interface.
+
+- **type** `custom`
+- **event** `{string}` The event name as signaled by application.
+- **name** `{string}` Peer name that emitted the event
+- **id** `{number}` Id of peer that emitted the event
+- `YOUR CUSTOM METRICS`
 
 ## <a name="contribute"></a> Contributing
 
@@ -155,3 +283,4 @@ Ideas and contributions to the project are welcome. You must follow this [guidel
 ## License
 
 GNU AGPLv3 © Tony Ivanov
+
