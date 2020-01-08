@@ -1,15 +1,7 @@
 #!/usr/bin/env node
 const parseArgs = require('minimist')
 const { defer } = require('deferinfer')
-const Simulator = require('../')
-const { TermMachine } = Simulator
-const { createWriteStream } = require('fs')
-const requireInject = require('require-inject')
 const { resolve } = require('path')
-
-// const chalk = require('chalk')
-// const { askSingle, confirm } = require('reloquent')
-// const { type, arch, hostname } = require('os')
 
 const usage = `
 usage: hypersim [OPTIONS] [PATH TO SCENARIO]
@@ -42,7 +34,8 @@ defer(async done => {
     log(usage)
     return process.exit(1)
   }
-  process.env.HYPERSIM_OUT = argv.o
+
+  if (argv.o) process.env.HYPERSIM_OUT = argv.o
   process.env.HYPERSIM_TEE = !!argv.T
 
   try {
