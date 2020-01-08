@@ -8,6 +8,7 @@ const { EventEmitter } = require('events')
 const BufferedThrottleStream = require('./lib/throttled-stream')
 const termAggregator = require('./lib/term-aggregator')
 const hyperswarm = require('hyperswarm')
+const prand = require('./lib/pseudo-random.js')
 
 // const sos = require('save-our-sanity')
 
@@ -274,7 +275,7 @@ class SimDHT {
 
   getCandiates (topic) {
     return this.listeningPeers[topic]
-      .sort(() => Math.random() - 0.5) // shuffle
+      .sort(() => prand() - 0.5) // shuffle
   }
 
   tick (iteration, deltaTime) {
@@ -410,7 +411,7 @@ class Simulator extends EventEmitter {
     for (const peer of this.peers) {
       // Yep, we havea QoS issue, reserving bandwith is one way but
       // but each tick we exhaust the bandwith on the first socket..
-      for (const socket of peer.sockets.sort(() => Math.random() - 0.5)) {
+      for (const socket of peer.sockets.sort(() => prand() - 0.5)) {
         const { src, dst } = socket
         if (socket.lastTick >= iteration) continue
         const budget = Math.max(this.bwReserve * deltaTime / 1000, Math.min(budgets[src.id], budgets[dst.id]))
@@ -486,3 +487,5 @@ function env2opts () {
 module.exports = Simulator
 module.exports.BufferedThrottleStream = BufferedThrottleStream
 module.exports.TermMachine = termAggregator
+
+prand
