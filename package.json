@@ -20,6 +20,8 @@
     "fast-fifo": "^1.0.0",
     "hypersim-parser": "^0.0.4",
     "hyperswarm": "^2.4.0",
+    "pretty-bytes": "^5.3.0",
+    "prettybandwidth": "^1.1.0",
     "random-access-file": "^2.1.3",
     "rimraf": "^3.0.0",
     "streamx": "^2.5.0"

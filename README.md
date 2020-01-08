@@ -119,7 +119,7 @@ function SpawnPeer(context, peerDone) {
   const feed = hypercore(storage)
 
   // Find peers to replicate with
-  feed.onReady(() => {
+  feed.ready(() => {
     // Handle remote connections
     swarm.on('connection', (socket, { client }) => {
       socket

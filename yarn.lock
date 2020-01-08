@@ -204,11 +204,6 @@ bulk-write-stream@^1.1.3:
     inherits "^2.0.1"
     readable-stream "^2.1.4"
 
-caller@^1.0.1:
-  version "1.0.1"
-  resolved "https://registry.yarnpkg.com/caller/-/caller-1.0.1.tgz#b851860f70e195db3d277395aa1a7e23ea30ecf5"
-  integrity sha1-uFGGD3Dhlds9J3OVqhp+I+ow7PU=
-
 callsites@^3.0.0:
   version "3.1.0"
   resolved "https://registry.yarnpkg.com/callsites/-/callsites-3.1.0.tgz#b3630abd8943432f54b3f0519238e33cd7df2f73"
@@ -1535,10 +1530,20 @@ prelude-ls@~1.1.2:
   resolved "https://registry.yarnpkg.com/prelude-ls/-/prelude-ls-1.1.2.tgz#21932a549f5e52ffd9a827f570e04be62a97da54"
   integrity sha1-IZMqVJ9eUv/ZqCf1cOBL5iqX2lQ=
 
+pretty-bytes@^5.3.0:
+  version "5.3.0"
+  resolved "https://registry.yarnpkg.com/pretty-bytes/-/pretty-bytes-5.3.0.tgz#f2849e27db79fb4d6cfe24764fc4134f165989f2"
+  integrity sha512-hjGrh+P926p4R4WbaB6OckyRtO0F0/lQBiT+0gnxjV+5kjPBrfVBFCsCLbMqVQeydvIoouYTCmmEURiH3R1Bdg==
+
 pretty-hash@^1.0.1:
   version "1.0.1"
   resolved "https://registry.yarnpkg.com/pretty-hash/-/pretty-hash-1.0.1.tgz#16e0579188def56bdb565892bcd05a5d65324807"
   integrity sha1-FuBXkYje9WvbVliSvNBaXWUySAc=
+
+prettybandwidth@^1.1.0:
+  version "1.1.0"
+  resolved "https://registry.yarnpkg.com/prettybandwidth/-/prettybandwidth-1.1.0.tgz#ab92057af236aa24ff61867eca1e0bdfc0602b89"
+  integrity sha512-CCxtZudMbpaIVsQ02YS9F+IToO1ExRJTtzy3ar5H8RuqgN6kbtR01n95Uvoeiam0K5oFr+8UwI1OfJwfwQd/nQ==
 
 process-nextick-args@~2.0.0:
   version "2.0.1"
@@ -1669,13 +1674,6 @@ regexpp@^3.0.0:
   version "3.0.0"
   resolved "https://registry.yarnpkg.com/regexpp/-/regexpp-3.0.0.tgz#dd63982ee3300e67b41c1956f850aa680d9d330e"
   integrity sha512-Z+hNr7RAVWxznLPuA7DIh8UNX1j9CDrUQxskw9IrBE1Dxue2lyXT+shqEIeLUjrokxIP8CMy1WkjgG3rTsd5/g==
-
-require-inject@^1.4.4:
-  version "1.4.4"
-  resolved "https://registry.yarnpkg.com/require-inject/-/require-inject-1.4.4.tgz#ac9859035296ad167975a58fd1ccf52c8f355cdf"
-  integrity sha512-5Y5ctRN84+I4iOZO61gm+48tgP/6Hcd3VZydkaEM3MCuOvnHRsTJYQBOc01faI/Z9at5nsCAJVHhlfPA6Pc0Og==
-  dependencies:
-    caller "^1.0.1"
 
 resolve-from@^4.0.0:
   version "4.0.0"

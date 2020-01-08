@@ -34,8 +34,24 @@ try {
       }, SimulatedPeer)
     }
 
+    // Launch 3 more peers after the first 3 reported done to
+    // measure saturated swarm speedup.
+    /*
+    let launchedExtra = false
+    simulator.on('tick', (i, stat) => {
+      if (!launchedExtra && stat.pending < 6) {
+        launchedExtra = true
+        for (let i = 0; i < nLeeches; i++) {
+          simulator.launch('leech', {
+            linkRate: 1024
+          }, SimulatedPeer)
+        }
+      }
+    })
+    */
+
     // Watch the data be replicated.
-    simulator.run(3, 50)
+    simulator.run(3, 100)
       .then(() => console.error('Simulation finished'))
       .catch(err => console.error('Simulation failed', err))
   })
