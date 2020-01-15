@@ -4,7 +4,7 @@ const { defer } = require('deferinfer')
 const { resolve } = require('path')
 
 const usage = `
-usage: hypersim [OPTIONS] [PATH TO SCENARIO]
+usage: hypersim [-T] [-o|-e] [PATH TO SCENARIO]
 
 \t-o/--output path
 \tRedirect simulator-log output to file. (Default: stdout)
@@ -12,6 +12,9 @@ usage: hypersim [OPTIONS] [PATH TO SCENARIO]
 \t -T
 \tTee output into Te®mMachine202x. Discards the main simlog
 \twhen -o is not set.
+
+\t -e/--elastic-url URL
+\t Stream output to elasticsearch node at URL
 
 example:
 \t$ hypersim -T -o swarm-log.json scenarios/my-scenario.js
@@ -22,10 +25,11 @@ const log = console.error
 defer(async done => {
   const argv = parseArgs(process.argv.slice(2), {
     boolean: ['T'],
-    string: ['o'],
+    string: ['o', 'e'],
     alias: {
       o: 'output',
-      h: 'help'
+      h: 'help',
+      e: 'elastic'
     }
   })
 
@@ -35,8 +39,13 @@ defer(async done => {
     return process.exit(1)
   }
 
+  // They don't have to be but i'm lazy.
+  if (argv.o && argv.e) done('-e and -o are mutually exclusive, pick one not both.')
+
   if (argv.o) process.env.HYPERSIM_OUT = argv.o
-  process.env.HYPERSIM_TEE = !!argv.T
+  else if (argv.e) process.env.HYPERSIM_ELASTIC_URL = argv.e
+
+  if (argv.T) process.env.HYPERSIM_TEE = 1
 
   try {
     require(scenarioPath)

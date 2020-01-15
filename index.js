@@ -5,9 +5,10 @@ const { mkdirSync, statSync, createWriteStream } = require('fs')
 const { join } = require('path')
 const rimraf = require('rimraf')
 const { EventEmitter } = require('events')
+const hyperswarm = require('hyperswarm')
 const BufferedThrottleStream = require('./lib/throttled-stream')
 const termAggregator = require('./lib/term-aggregator')
-const hyperswarm = require('hyperswarm')
+const ElasticStreamer = require('./lib/elastic-streamer.js')
 const prand = require('./lib/pseudo-random.js')
 
 // const sos = require('save-our-sanity')
@@ -53,7 +54,7 @@ class SimulatedPeer {
     // Maybe just return false and silently abort on already connected.
     if (this.isConnected(peer)) return callback(new Error('Already connected'))
     const socket = new BufferedThrottleStream()
-    socket.id = `${sckCtr++}#${this.id}:${peer.id}`
+    socket.id = `${sckCtr++}` // #${this.id}:${peer.id}`
     socket.src = this
     socket.dst = peer
     const x = this._accept(socket, true)
@@ -297,6 +298,7 @@ class Simulator extends EventEmitter {
 
     // Default logging behaviour is to output ndjson to STDOUT
     this._logger = opts.logger || (msg => console.log(JSON.stringify(msg)))
+    if (opts._OnFinishHack) this.on(FINISHED, opts._OnFinishHack)
 
     this.time = 0
     this.iteration = 0
@@ -313,6 +315,7 @@ class Simulator extends EventEmitter {
 
   _transition (newState, ...extra) {
     this._signal('simulator', `state-${newState}`, ...extra)
+    this.emit(newState)
     this._state = newState
   }
 
@@ -470,6 +473,12 @@ function env2opts () {
     const outputFile = process.env.HYPERSIM_OUT
     const logFileStream = createWriteStream(outputFile)
     logger = line => logFileStream.write(JSON.stringify(line))
+  } else if (process.env.HYPERSIM_ELASTIC_URL) {
+    const estream = new ElasticStreamer(process.env.HYPERSIM_ELASTIC_URL)
+    logger = line => estream.index(line)
+    opts._OnFinishHack = () => {
+      estream.commitBatch(true)
+    }
   }
 
   if (process.env.HYPERSIM_TEE) {
@@ -480,6 +489,7 @@ function env2opts () {
       l2(line)
     }
   }
+
   if (logger) opts.logger = logger
   return opts
 }

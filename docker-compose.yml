@@ -1,0 +1,27 @@
+version: '3.7'
+services:
+  es:
+    image: docker.elastic.co/elasticsearch/elasticsearch-oss:7.5.1
+    volumes:
+      - "$PWD/_esdata:/usr/share/elasticsearch/data"
+    ports:
+      - "9200:9200"
+    environment:
+      - discovery.type=single-node
+      - "ES_JAVA_OPTS=-Xms1024m -Xmx1024m"
+      - node.name=hs1
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+  kibana:
+   image: docker.elastic.co/kibana/kibana-oss:7.5.1
+   environment:
+     ELASTICSEARCH_URL: "https://es:9200"
+   ports:
+     - "5601:5601"
+   links:
+     - "es:elasticsearch"

@@ -27,6 +27,7 @@
     "streamx": "^2.5.0"
   },
   "devDependencies": {
+    "@elastic/elasticsearch": "^7.5.0",
     "hypercore": "^8.4.0",
     "random-access-memory": "^3.1.1",
     "save-our-sanity": "^1.0.1",
