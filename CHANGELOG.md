@@ -12,3 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed accidental logfile creation named `undefined`.
 ### Added
 - TermAggregator: Transfers totals were added to peer display
+
+## [0.9.0] - 2020-01-15
+### Added
+- Elasticsearch indexing support

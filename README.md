@@ -42,7 +42,14 @@ yarn add -D hyper-simulator
 Running from commandline:
 
 ```bash
+# Run scenario and display the realtime stats in terminal
 $(npm bin)/hypersim -T scenarios/myapp-scenario.js
+
+# Run scenario and dump events to file
+$(npm bin)/hypersim scenarios/myapp-scenario.js > swarm-log.json
+
+# Run scenario and index all events in Elasticsearch
+$(npm bin)/hypersim -e http://localhost:9200 scenario/myapp-scenario.js
 ```
 
 ### Defining a Scenario

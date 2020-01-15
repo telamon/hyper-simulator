@@ -6,15 +6,15 @@ const { resolve } = require('path')
 const usage = `
 usage: hypersim [-T] [-o|-e] [PATH TO SCENARIO]
 
-\t-o/--output path
+\t-o/--output PATH
 \tRedirect simulator-log output to file. (Default: stdout)
 
-\t -T
+\t-T
 \tTee output into Te®mMachine202x. Discards the main simlog
 \twhen -o is not set.
 
-\t -e/--elastic-url URL
-\t Stream output to elasticsearch node at URL
+\t-e/--elastic-url URL
+\tStream output to elasticsearch node at URL
 
 example:
 \t$ hypersim -T -o swarm-log.json scenarios/my-scenario.js
@@ -33,11 +33,12 @@ defer(async done => {
     }
   })
 
-  const scenarioPath = resolve(process.cwd(), argv._.shift())
-  if (!scenarioPath || argv.h) {
+  if (!argv._[0] || argv.h) {
     log(usage)
     return process.exit(1)
   }
+
+  const scenarioPath = resolve(process.cwd(), argv._.shift())
 
   // They don't have to be but i'm lazy.
   if (argv.o && argv.e) done('-e and -o are mutually exclusive, pick one not both.')
