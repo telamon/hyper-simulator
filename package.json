@@ -1,6 +1,6 @@
 {
   "name": "hyper-simulator",
-  "version": "0.8.1",
+  "version": "0.9.0",
   "description": "p2p swarm-simulator to test and benchmark decentralized applications",
   "main": "index.js",
   "files": [
