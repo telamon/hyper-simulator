@@ -151,7 +151,8 @@ class SimulatedPeer {
       signal: (ev, args = {}) => {
         this._rootSignal('custom', ev, { ...args, name: this.name, id: this.id })
       },
-      ontick: handler => { this._onTickHandler = handler }
+      ontick: handler => { this._onTickHandler = handler },
+      random: prand
     }
 
     let peerDone = null
@@ -497,5 +498,3 @@ function env2opts () {
 module.exports = Simulator
 module.exports.BufferedThrottleStream = BufferedThrottleStream
 module.exports.TermMachine = termAggregator
-
-prand

@@ -16,3 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.9.0] - 2020-01-15
 ### Added
 - Elasticsearch indexing support
+
+## [0.10.0] - 2020-01-xx
+### Added
+- Deterministic pseudo `random()` is now available via peer context
+### Changed
+- Fixed eternal loop bug caused by LRU.peek()

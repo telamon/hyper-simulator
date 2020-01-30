@@ -7,7 +7,8 @@ const { publicKey, secretKey } = keyPair()
 
 const nLeeches = 8
 const nBlocks = 40
-
+const SEED = 'S'
+const LEECH = 'L'
 try {
   const simulator = new HyperSim({
     // logger: HyperSim.TermMachine()
@@ -16,7 +17,7 @@ try {
 
   simulator.ready(() => {
     // Launch one seed.
-    simulator.launch('seed', {
+    simulator.launch(SEED, {
       linkRate: 56 << 10
     }, SimulatedPeer)
 
@@ -29,26 +30,24 @@ try {
           case 2: return 512 << 8
         }
       })()
-      simulator.launch('leech', {
+      simulator.launch(LEECH, {
         linkRate
       }, SimulatedPeer)
     }
 
     // Launch 3 more peers after the first 3 reported done to
     // measure saturated swarm speedup.
-    /*
     let launchedExtra = false
     simulator.on('tick', (i, stat) => {
       if (!launchedExtra && stat.pending < 6) {
         launchedExtra = true
         for (let i = 0; i < nLeeches; i++) {
-          simulator.launch('leech', {
+          simulator.launch(LEECH, {
             linkRate: 1024
           }, SimulatedPeer)
         }
       }
     })
-    */
 
     // Watch the data be replicated.
     simulator.run(3, 100)
@@ -64,7 +63,7 @@ function SimulatedPeer (context, end) {
 
   const feed = hypercore(storage, publicKey, {
     // Let only the seed have the secretKey
-    secretKey: name === 'seed' ? secretKey : null
+    secretKey: name === SEED ? secretKey : null
   })
 
   const setupSwarm = () => {
@@ -77,12 +76,12 @@ function SimulatedPeer (context, end) {
       socket.once('error', e => signal('sock-error', { error: e.message }))
       proto.once('error', e => signal('proto-error', { error: e.message }))
     })
-    if (name === 'seed') end()
+    if (name === SEED) end()
   }
 
   // setup content
   feed.ready(() => {
-    if (name !== 'seed') {
+    if (name !== SEED) {
       feed.on('download', (seq, chunk, peer) => {
         signal('download', { seq })
         // Ending conditions for a leech is to have all blocks
