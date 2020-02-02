@@ -7,8 +7,8 @@ const { publicKey, secretKey } = keyPair()
 
 const nLeeches = 8
 const nBlocks = 40
-const SEED = 'S'
-const LEECH = 'L'
+const SEED = 'Seed'
+const LEECH = 'Leech'
 try {
   const simulator = new HyperSim({
     // logger: HyperSim.TermMachine()
