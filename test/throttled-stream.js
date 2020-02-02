@@ -33,7 +33,7 @@ test('Raw transfer, sanityCheck', t => {
     }
     setTimeout(() => {
       const { rxEnd, txEnd } = sock.tick(itr++, 1000)
-      if (pending && (rxEnd && txEnd)) t.notOk(pending)
+      if (pending && (rxEnd && txEnd)) t.fail('Test still pending but socket reports end')
       loop()
     }, 100)
   }
