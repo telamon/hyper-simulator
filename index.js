@@ -40,6 +40,7 @@ class SimulatedPeer {
     })
     this._rootSignal = signal
     this._signal('init')
+    this.pendingTimers = []
   }
 
   isConnected (peer) {
@@ -86,6 +87,17 @@ class SimulatedPeer {
       state: this.finished ? 'done' : 'active',
       age: this.age,
       finished: this.finished
+    }
+
+    // Trigger timers
+    for (const timer of this.pendingTimers) {
+      timer.timeLeft -= delta
+      if (timer.timeLeft <= 0) {
+        const check = this.pendingTimers
+          .splice(this.pendingTimers.indexOf(timer), 1)
+        if (check[0] !== timer) throw new Error('Unexpected timer removed')
+        timer.resolve()
+      }
     }
 
     // Call handler and merge it's output into summary
@@ -152,7 +164,15 @@ class SimulatedPeer {
         this._rootSignal('custom', ev, { ...args, name: this.name, id: this.id })
       },
       ontick: handler => { this._onTickHandler = handler },
-      random: prand
+      random: prand,
+      timeout: msec => {
+        return new Promise(resolve => {
+          this.pendingTimers.push({
+            timeLeft: msec,
+            resolve
+          })
+        })
+      }
     }
 
     let peerDone = null

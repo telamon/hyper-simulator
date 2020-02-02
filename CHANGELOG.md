@@ -20,5 +20,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.10.0] - 2020-01-xx
 ### Added
 - Deterministic pseudo `random()` is now available via peer context
+- `context.timeout(Number) -> Promise` added. setTimeout() for Simulated time.
 ### Changed
-- Fixed eternal loop bug caused by LRU.peek()
+- Fixed eternal loop bug caused by fifo.peek()
