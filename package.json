@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "description": "p2p swarm-simulator to test and benchmark decentralized applications",
   "main": "index.js",
+  "bin": {
+    "hypersim": "./bin/hypersim"
+  },
   "files": [
     "lib",
     "bin",
