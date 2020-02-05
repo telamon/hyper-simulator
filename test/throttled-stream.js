@@ -34,7 +34,7 @@ test('Raw transfer, sanityCheck', t => {
     setTimeout(() => {
       const { rxEnd, txEnd } = sock.tick(itr++, 1000)
       if (pending && (rxEnd && txEnd)) t.fail('Test still pending but socket reports end')
-      loop()
+      else loop()
     }, 100)
   }
   loop()
@@ -60,8 +60,10 @@ test('Hypercore replication', t => {
           t.equal(msg.toString(), 'a message', 'Message was replicated')
           --pending
         })
+
         sock.pipe(local, () => t.pass(`sock->local finished ${--pending}`))
           .pipe(sock, () => t.pass(`local->sock finished ${--pending}`))
+
         sock.out.pipe(remote, () => t.pass(`sock.out->local finished ${--pending}`))
           .pipe(sock.out, () => t.pass(`local->sock.out finished ${--pending}`))
       })
