@@ -26,3 +26,9 @@ No more errors during prolonged runs!
 ### Changed
 - Fixed eternal loop bug caused by fifo.peek()
 - Fixed issue with ThrottledStream where the readable state was closed twice.
+
+## [1.1.0] - 2020-03-05
+### Added
+- Implemented BoundSwarm#leave(topic, cb)
+### Changed
+- Fixed invalid storage path. apologies for polluting your 'node_modules/'

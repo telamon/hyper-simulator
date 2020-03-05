@@ -247,12 +247,20 @@ class BoundSwarm extends EventEmitter {
   }
 
   join (topic, { lookup, announce } = {}) {
+    if (Buffer.isBuffer(topic)) topic = topic.toString('hex') // buffers can't be keys
     this.lookup = !(lookup === false)
     this.announce = !(announce === false)
 
     if (!this.lookup && !this.announce) throw new Error('At both lookup and announce can\'t be set to false')
     if (this.lookup) this.queryLookup()
     if (this.announce) this.doAnnounce(topic)
+  }
+
+  leave (topic, cb) {
+    if (Buffer.isBuffer(topic)) topic = topic.toString('hex') // buffers can't be keys
+    this.dht.unregister(topic, this.peer)
+    this.joinedTopics.splice(this.joinedTopics.indexOf(topic), 1)
+    if (typeof cb === 'function') cb()
   }
 
   doAnnounce (topic) {
@@ -313,7 +321,8 @@ class Simulator extends EventEmitter {
   constructor (opts = {}) {
     super()
     Object.assign(opts, env2opts())
-    this.poolPath = opts.poolPath || join(__dirname, '_cache')
+
+    this.poolPath = opts.poolPath || join(process.cwd(), '.hypersim_cache')
     this._idCtr = 0
     this._simdht = new SimDHT(this._signal.bind(this))
 
