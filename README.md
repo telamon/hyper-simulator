@@ -119,6 +119,7 @@ function SpawnPeer(context, peerDone) {
     opts,    // Copy of opts given to launch()
     signal,  // Function signal(eventName, payload) (more on this below)
     ontick,  // Lets you register a handler for peer.tick event: ontick(myHandlerFun)
+    setTimeout, // Like vanilla setTimeout but uses simulated time instead.
     simulator // reference to the simulator.
   } = context
 
