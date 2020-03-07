@@ -40,3 +40,6 @@ No more errors during prolonged runs!
 - Replaced timer checker with new fast scheduler implmentation.
 - Deprecated SimulatedPeer#context.timeout
 
+## [1.2.1] - 2020-03-07
+### Changed
+- Fixed typo that caused premature invocation
