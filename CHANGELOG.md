@@ -32,3 +32,11 @@ No more errors during prolonged runs!
 - Implemented BoundSwarm#leave(topic, cb)
 ### Changed
 - Fixed invalid storage path. apologies for polluting your 'node_modules/'
+
+## [1.2.0] - 2020-03-07
+### Added
+- SimulatedPeer#context.setTimeout() added
+### Changed
+- Replaced timer checker with new fast scheduler implmentation.
+- Deprecated SimulatedPeer#context.timeout
+

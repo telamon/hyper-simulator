@@ -10,6 +10,7 @@ const BufferedThrottleStream = require('./lib/throttled-stream')
 const termAggregator = require('./lib/term-aggregator')
 const ElasticStreamer = require('./lib/elastic-streamer.js')
 const prand = require('./lib/pseudo-random.js')
+const Scheduler = require('./lib/scheduler')
 
 // const sos = require('save-our-sanity')
 
@@ -40,7 +41,7 @@ class SimulatedPeer {
     })
     this._rootSignal = signal
     this._signal('init')
-    this.pendingTimers = []
+    this.scheduler = new Scheduler()
   }
 
   isConnected (peer) {
@@ -89,16 +90,8 @@ class SimulatedPeer {
       finished: this.finished
     }
 
-    // Trigger timers
-    for (const timer of this.pendingTimers) {
-      timer.timeLeft -= delta
-      if (timer.timeLeft <= 0) {
-        const check = this.pendingTimers
-          .splice(this.pendingTimers.indexOf(timer), 1)
-        if (check[0] !== timer) throw new Error('Unexpected timer removed')
-        timer.resolve()
-      }
-    }
+    // Run scheduler
+    this.scheduler.deltaTick(delta)
 
     // Call handler and merge it's output into summary
     if (typeof this._onTickHandler === 'function') {
@@ -165,13 +158,10 @@ class SimulatedPeer {
       },
       ontick: handler => { this._onTickHandler = handler },
       random: prand,
+      setTimeout: this.scheduler.setTimeout.bind(this.scheduler),
       timeout: msec => {
-        return new Promise(resolve => {
-          this.pendingTimers.push({
-            timeLeft: msec,
-            resolve
-          })
-        })
+        console.warning('deprecated: Peer#context.timeout, use Peer#context.setTimeout')
+        return new Promise(resolve => this.scheduler.setTimeout(msec, resolve))
       }
     }
 
