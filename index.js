@@ -42,6 +42,7 @@ class SimulatedPeer {
     this._rootSignal = signal
     this._signal('init')
     this.scheduler = new Scheduler()
+    this.version = null
   }
 
   isConnected (peer) {
@@ -61,7 +62,7 @@ class SimulatedPeer {
     socket.dst = peer
     const x = this._accept(socket, true)
     const y = peer._accept(socket, false)
-    if (!(x && y)) debugger // This shouldn't ever happen
+    if (!(x && y)) throw new Error('Invalid State') // This shouldn't ever happen
     return callback(null, socket)
   }
 
@@ -87,7 +88,8 @@ class SimulatedPeer {
       load: (rx + tx) / (this.linkRate * delta / 1000),
       state: this.finished ? 'done' : 'active',
       age: this.age,
-      finished: this.finished
+      finished: this.finished,
+      version: this.version
     }
 
     // Run scheduler
@@ -146,6 +148,8 @@ class SimulatedPeer {
       this.boundSwarm = hyperswarm()
     }
 
+    // Construct the Peer Context,
+    // the primary interface to the simulator.
     const context = {
       opts,
       id: this.id,
@@ -164,7 +168,10 @@ class SimulatedPeer {
         return new Promise(resolve => this.scheduler.setTimeout(msec, resolve))
       }
     }
-
+    Object.defineProperty(context, 'version', {
+      get: () => this.version,
+      set: v => { this.version = v }
+    })
     let peerDone = null
     const prom = defer(done => { peerDone = done })
 
@@ -220,8 +227,10 @@ class BoundSwarm extends EventEmitter {
           // Attempt to connect
           this.peer.connect(peer, (err, socket) => {
             if (err) return this.peerQueue.push(n)
-            this.emit('connection', socket, { client: true })
-            peer.boundSwarm.emit('connection', socket.out, { client: false })
+            const topic = n.topic[0] === '¤' ? Buffer.from(n.topic.substr(1), 'hex') : n.topic
+            socket.topic = topic
+            this.emit('connection', socket, { client: true, topic })
+            peer.boundSwarm.emit('connection', socket.out, { client: false, topic })
 
             // this.peer.signal(initiator ? 'connect' : 'accept', {
             //   src: this.peer.id,
@@ -237,7 +246,7 @@ class BoundSwarm extends EventEmitter {
   }
 
   join (topic, { lookup, announce } = {}) {
-    if (Buffer.isBuffer(topic)) topic = topic.toString('hex') // buffers can't be keys
+    if (Buffer.isBuffer(topic)) topic = '¤' + topic.toString('hex') // buffers can't be keys
     this.lookup = !(lookup === false)
     this.announce = !(announce === false)
 
@@ -247,7 +256,7 @@ class BoundSwarm extends EventEmitter {
   }
 
   leave (topic, cb) {
-    if (Buffer.isBuffer(topic)) topic = topic.toString('hex') // buffers can't be keys
+    if (Buffer.isBuffer(topic)) topic = '¤' + topic.toString('hex') // buffers can't be keys
     this.dht.unregister(topic, this.peer)
     this.joinedTopics.splice(this.joinedTopics.indexOf(topic), 1)
     if (typeof cb === 'function') cb()
@@ -266,7 +275,8 @@ class BoundSwarm extends EventEmitter {
           this.peerQueue.push({
             lastAttempt: -20000,
             attempts: 10,
-            peer: cand
+            peer: cand,
+            topic
           })
           this.emit('peer', cand)
         }
@@ -303,7 +313,7 @@ class SimDHT {
   }
 
   async close () {
-    // TOOD: Not Implemented
+    // TOOD: Not Implemented / Not needed?
   }
 }
 
@@ -432,8 +442,9 @@ class Simulator extends EventEmitter {
 
     // Pump the simulated sockets
     for (const peer of this.peers) {
-      // Yep, we havea QoS issue, reserving bandwith is one way but
+      // Yep, we have a QoS issue, reserving bandwith is one way but
       // but each tick we exhaust the bandwith on the first socket..
+      // TODO: Improve this quick'n'dirty random shuffle.
       for (const socket of peer.sockets.sort(() => prand() - 0.5)) {
         const { src, dst } = socket
         if (socket.lastTick >= iteration) continue
