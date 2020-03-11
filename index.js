@@ -166,7 +166,8 @@ class SimulatedPeer {
       timeout: msec => {
         console.warning('deprecated: Peer#context.timeout, use Peer#context.setTimeout')
         return new Promise(resolve => this.scheduler.setTimeout(msec, resolve))
-      }
+      },
+      trace: () => traceNetwork(this)
     }
     Object.defineProperty(context, 'version', {
       get: () => this.version,
@@ -404,6 +405,8 @@ class Simulator extends EventEmitter {
   run (speed = 0.1, interval = 200) {
     this._transition(RUNNING, { speed, interval })
     return defer(async done => {
+      // Why am i measuring real time between ticks?
+      // they should be running in sim time..
       let timeLastRun = new Date().getTime()
       while (this._state === RUNNING) {
         await defer(d => setTimeout(d, interval))
@@ -523,6 +526,24 @@ function env2opts () {
 
   if (logger) opts.logger = logger
   return opts
+}
+
+// Slow recursive function for diagnostics.
+// I wanted to make sure that the random network topology
+// is not what causing forward failure
+function traceNetwork (peer, path = []) {
+  if (!path.length) path.push(peer) // store first
+
+  for (const socket of peer.sockets) {
+    const other = socket.dst === peer ? socket.src : socket.dst
+    if (path.indexOf(other) === -1) {
+      path.push(other) // new peer discovered
+      return traceNetwork(other, path)
+    }
+  }
+  if (path[0] === peer) return path
+  const prev = path[path.indexOf(peer) - 1]
+  return traceNetwork(prev, path)
 }
 
 module.exports = Simulator
