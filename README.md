@@ -3,28 +3,60 @@
 [![Build Status](https://travis-ci.org/decentstack/hyper-simulator.svg?branch=master)](https://travis-ci.org/decentstack/hyper-simulator)
 [![JavaScript Style Guide](https://img.shields.io/badge/code_style-standard-brightgreen.svg)](https://standardjs.com)
 
-> Simulate a swarm of peers running hyperswarm compatible applications
+> Swarm Integration Testing - because unit-tests for P2P sucks.
 
-The simulation generates a detailed "swarm-log" in `ndjson` format that can be used to analyze your applications
-behaviour over time.
+This project grew out of the frustration of always finding new and exotic bugs in production that were a complete pain to predict or reproduce with unit-tests.
 
-The screencast below demonstrates the built-in terminal-aggregator view that
-shows the simulator's status in real-time! Further offline analysis can be done anyway you want, heres
-a couple of related projects:
+- Hyper-simulator is not a replacement for your unit tests, you will still need them.
+- Hyper-simulator might be a replacement for your friends, if you only keep them around as involuntary beta-testers.
 
-- [hypersim-parser](https://github.com/decentstack/hypersim-parser) Fast and memory efficient ndjson aggregator.
+Write a scenario for your application and let it run for a couple of minutes.
+If you did **NOT** uncover any new errors within 5 minutes of sim-time,
+please file a [formal complaint](/decentstack/hyper-simulator/issues/new).
+<sub>(I'm happy to assit!)</sub>
+
+
+Using the detailed `ndjson` output you can benchmark your program or
+create an [interactive visualization](https://github.com/decentstack/hypersim-visualizer).
+We also have built-in support for dumping simulator-output directly to Elasticsearch. Further offline analysis can be done anyway you desire
+
+
+<details><summary><strong><a>How it works</a></strong> <sub>(Technical Details)</sub></summary>
+It's pretty simple!
+
+The whole simulation runs **offline** and _in-memory_.
+
+It features a _simulated swarm_ and discovery process compatible with the `hyperswarm` API.
+
+Each connection generated within the simulator is wrapped in a [ThrottledStream](https://github.com/decentstack/hyper-simulator/blob/master/lib/throttled-stream.js) that gives us control over data-transmission.
+
+So the simulator runs in _iterations_ where each call to `sim.process(deltaTime)` generates a heartbeat/"tick"
+
+It uses the same approach as many physics-based games, having a mainLoop that takes an amount of time as input which is used to fuel the calculations.
+
+During each tick; we animate the simulated swarm, firing simulated `peer` and `connection` events,  and then pump all active ThrottledStreams providing them with bandwidth calculated by the amount of bandwidth remaining between the two peers. (the `QoS` could use some improvement.)
+
+Each such process iteration generates multiple `ndjson` messages.
+The `signal` method is a helper to let peers in your scenario report their own log messages during the run. :) (your message automatically get stamped with the peer-id nothing special)
+
+The resulting logfile can be analyzed offline or in realtime but given some custom signals it can tell you how your application will behave given a network of N-Peers.
+
+The project arose as an alternative to organize 30 people to run `your_application@version` and ask them to shout when the desired objective is reached. :)
+
+Anyway, let me know if you give it a test-run, I've only used it to debug scaling issues in my own apps so far.
+
+P.S.
+The `storage` is convenient `random-access-file` wrapper that subpaths everything as `$PWD/.hypersim_cache/${peer.id}/${requested_path}`, the `_cache` folder gets deleted before and after each run.
+</details>
+
+<br/>
+
+Features a built-in realtime log-aggregator:
+[![asciicast](https://asciinema.org/a/9AcikNnlS2UA8yR8eY3MFRi2R.svg)](https://asciinema.org/a/9AcikNnlS2UA8yR8eY3MFRi2R)
+
+Related projects:
+- [hypersim-parser](https://github.com/decentstack/hypersim-parser) Fast and memory efficient ndjson aggregator. (Starting point for log-parsing)
 - [hypersim-visualizer](https://github.com/decentstack/hypersim-visualizer) fancy Vue+D3.js visualizer.
-
-[![asciicast](https://asciinema.org/a/292041.svg)](https://asciinema.org/a/292041)
-
-TODO:
-
-- [x] Refactor behaviour registration interface
-- [x] Let executable output minimal aggregation during runtime.
-- [x] Release `hypersim-parser`
-- [x] Provide hyperswarm interface
-- [ ] Release `hypersim-visualizer`
-- [ ] Support real hyperswarm with simulated network stack?
 
 ## <a name="install"></a> Install
 

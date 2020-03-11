@@ -37,17 +37,18 @@ try {
 
     // Launch 3 more peers after the first 3 reported done to
     // measure saturated swarm speedup.
+    /*
     let launchedExtra = false
     simulator.on('tick', (i, stat) => {
       if (!launchedExtra && stat.pending < 6) {
         launchedExtra = true
-        for (let i = 0; i < nLeeches; i++) {
+        for (let i = 0; i < 3; i++) {
           simulator.launch(LEECH, {
             linkRate: 1024
           }, SimulatedPeer)
         }
       }
-    })
+    })*/
 
     // Watch the data be replicated.
     simulator.run(3, 100)
@@ -81,6 +82,7 @@ function SimulatedPeer (context, end) {
 
   // setup content
   feed.ready(() => {
+    setupSwarm()
     if (name !== SEED) {
       feed.on('download', (seq, chunk, peer) => {
         signal('download', { seq })
@@ -89,21 +91,24 @@ function SimulatedPeer (context, end) {
           end()
         }
       })
-      setupSwarm()
     } else {
       let pendingInserts = nBlocks
       const appendRandom = () => {
-        feed.append(randomBytes(512 << 8), err => {
-          if (err) return end(err)
-          signal('append', { seq: feed.length })
-          if (!--pendingInserts) setupSwarm()
-          else appendRandom()
-        })
+        context.setTimeout(() => {
+          feed.append(randomBytes(512 << 8), err => {
+            if (err) return end(err)
+            signal('append', { seq: feed.length })
+            if (!--pendingInserts) return 0
+            else appendRandom()
+          })
+        }, 1000)
       }
       appendRandom()
     }
 
     ontick(v => {
+      // TODO: oops these are almost duplicate features..
+      context.version = feed.downloaded()
       return { downloaded: feed.downloaded() }
     })
   })
