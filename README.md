@@ -52,6 +52,7 @@ The `storage` is convenient `random-access-file` wrapper that subpaths everythin
 <br/>
 
 Features a built-in realtime log-aggregator:
+
 [![asciicast](https://asciinema.org/a/9AcikNnlS2UA8yR8eY3MFRi2R.svg)](https://asciinema.org/a/9AcikNnlS2UA8yR8eY3MFRi2R)
 
 Related projects:
