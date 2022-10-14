@@ -1,6 +1,5 @@
 # hyper-simulator
 
-[![Build Status](https://travis-ci.org/decentstack/hyper-simulator.svg?branch=master)](https://travis-ci.org/decentstack/hyper-simulator)
 [![JavaScript Style Guide](https://img.shields.io/badge/code_style-standard-brightgreen.svg)](https://standardjs.com)
 
 > Swarm Integration Testing - because unit-tests for P2P sucks.
@@ -8,21 +7,27 @@
 This project grew out of the frustration of always finding new and exotic bugs in production that were a complete pain to predict or reproduce with unit-tests.
 
 - Hyper-simulator is not a replacement for your unit tests, you will still need them.
-- Hyper-simulator might be a replacement for your friends, if you only keep them around as involuntary beta-testers.
+- Hyper-simulator is not be a replacement for your peers/friends, you still need them.
 
 Write a scenario for your application and let it run for a couple of minutes.
 If you did **NOT** uncover any new errors within 5 minutes of sim-time,
-please file a [formal complaint](/decentstack/hyper-simulator/issues/new).
-<sub>(I'm happy to assit!)</sub>
+please file a [formal complaint](/decentstack/hyper-simulator/issues/new). ;)
 
 
-Using the detailed `ndjson` output you can benchmark your program or
-create an [interactive visualization](https://github.com/decentstack/hypersim-visualizer).
-We also have built-in support for dumping simulator-output directly to Elasticsearch. Further offline analysis can be done anyway you desire
+
+The hacky-terminal output below is the built-in log-parser/visualizer that i've been using the past time.
+I wish there was something more fancy, but everytime I run the simulator I find a higher priority issue
+in the app that's being simulated...
+
+So I guess the simulator does what it's supposed to do 🌟
+
+Ping me on discord, happy to help / [@telamohn](https://discord.gg/8RMRUPZ9RS)
 
 
 <details><summary><strong><a>How it works</a></strong> <sub>(Technical Details)</sub></summary>
-It's pretty simple!
+
+> TL;DR; The simulator measures the virtual swarm and virtual peers, then logs each moment in sim-time as an `ndjson` event that can be analyzed and aggregated.
+
 
 The whole simulation runs **offline** and _in-memory_.
 
@@ -43,7 +48,7 @@ The resulting logfile can be analyzed offline or in realtime but given some cust
 
 The project arose as an alternative to organize 30 people to run `your_application@version` and ask them to shout when the desired objective is reached. :)
 
-Anyway, let me know if you give it a test-run, I've only used it to debug scaling issues in my own apps so far.
+Anyway, let me know if you give it a test-run.
 
 P.S.
 The `storage` is convenient `random-access-file` wrapper that subpaths everything as `$PWD/.hypersim_cache/${peer.id}/${requested_path}`, the `_cache` folder gets deleted before and after each run.
@@ -57,7 +62,7 @@ Features a built-in realtime log-aggregator:
 
 Related projects:
 - [hypersim-parser](https://github.com/decentstack/hypersim-parser) Fast and memory efficient ndjson aggregator. (Starting point for log-parsing)
-- [hypersim-visualizer](https://github.com/decentstack/hypersim-visualizer) fancy Vue+D3.js visualizer.
+- ~~[hypersim-visualizer](https://github.com/decentstack/hypersim-visualizer) fancy Vue+D3.js visualizer.~~
 
 ## <a name="install"></a> Install
 
